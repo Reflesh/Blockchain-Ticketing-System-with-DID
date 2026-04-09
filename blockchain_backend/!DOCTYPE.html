@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Polygon 스마트 티켓팅</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 400px; text-align: center; }
+        input { width: 90%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 6px; }
+        button { background-color: #8247E5; color: white; border: none; padding: 12px 20px; width: 100%; border-radius: 6px; cursor: pointer; font-size: 16px; font-weight: bold; margin-top: 10px; }
+        button:hover { background-color: #6a36c9; }
+        #status { margin-top: 20px; font-size: 14px; color: #333; word-break: break-all; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="card" id="loginBox">
+    <h2>🎫 스마트 티켓 회원가입</h2>
+    <p style="font-size: 13px; color: gray;">가입 시 자동으로 블록체인 지갑이 생성됩니다.</p>
+    <input type="text" id="username" placeholder="아이디 입력 (예: pknu_student)">
+    <input type="password" id="password" placeholder="비밀번호 입력">
+    <button onclick="signUp()">회원가입 및 시작하기</button>
+    <div id="loginStatus" style="margin-top: 15px; color: #e74c3c; font-size: 14px;"></div>
+</div>
+
+<div class="card hidden" id="ticketBox">
+    <h2>🎸 2026 PKNU 콘서트 예매</h2>
+    <p id="welcomeMsg" style="font-weight: bold; color: #8247E5;"></p>
+    <p style="font-size: 12px; color: gray;">동반인 지갑 주소를 입력하세요 (선택사항, 쉼표로 구분)</p>
+    <input type="text" id="companions" placeholder="ex) 0x111..., 0x222...">
+    <button onclick="buyTicket()">무료로 예매하기</button>
+    <div id="status"></div>
+</div>
+
+<script>
+    // 현재 접속한 유저의 아이디를 임시 저장하는 공간
+    let currentUser = ""; 
+
+    async function signUp() {
+        const id = document.getElementById('username').value;
+        const pw = document.getElementById('password').value;
+        document.getElementById('loginStatus').innerText = "지갑 생성 중... (약 1초 소요)";
+
+        try {
+            const response = await fetch('http://127.0.0.1:8000/api/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: id, password: pw })
+            });
+            const data = await response.json();
+            
+            if(response.ok) {
+                // 가입 성공! 화면 전환
+                currentUser = data.username; // 아이디 기억하기
+                document.getElementById('loginBox').classList.add('hidden');
+                document.getElementById('ticketBox').classList.remove('hidden');
+                document.getElementById('welcomeMsg').innerText = `${currentUser}님, 환영합니다!`;
+            } else {
+                document.getElementById('loginStatus').innerText = "오류: " + data.detail;
+            }
+        } catch(e) {
+            document.getElementById('loginStatus').innerText = "서버가 켜져 있는지 확인하세요!";
+        }
+    }
+
+    async function buyTicket() {
+        // 복잡한 지갑 주소 대신, 방금 기억해둔 아이디(currentUser)만 서버로 보냅니다!
+        const compInput = document.getElementById('companions').value;
+        const compList = compInput ? compInput.split(',').map(s => s.trim()) : [];
+        const statusDiv = document.getElementById('status');
+        
+        statusDiv.innerHTML = "⏳ 블록체인에 기록 중입니다... (최대 1분 소요)";
+
+        const response = await fetch('http://127.0.0.1:8000/api/buy-tickets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                username: currentUser,  // 프론트엔드가 아이디를 알아서 넣어줍니다.
+                companions: compList 
+            })
+        });
+        const data = await response.json();
+
+        if(response.ok) {
+            statusDiv.innerHTML = `
+                <span style="color: green; font-weight: bold;">✅ 예매 완료!</span><br>
+                당신의 지갑: <br><span style="font-size: 11px; color: gray;">${data.buyer_wallet}</span><br><br>
+                <a href="https://polygonscan.com/tx/${data.transaction_hash}" target="_blank" style="color: #8247E5; font-weight: bold; text-decoration: none;">🔍 블록체인 영수증(해시) 확인하기</a>
+            `;
+        } else {
+            statusDiv.innerHTML = `<span style="color: red;">❌ 오류: ${data.detail}</span>`;
+        }
+    }
+</script>
+</body>
+</html>
