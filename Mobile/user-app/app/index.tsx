@@ -73,6 +73,7 @@ export default function HomeScreen() {
   const [activeCategory, setActiveCategory] = useState('전체');
   const [carouselIndex, setCarouselIndex] = useState(0);
   const carouselRef = useRef<FlatList>(null);
+  const isUserScrolling = useRef(false);
 
   const openDrawer = useCallback(() => {
     setDrawerOpen(true);
@@ -125,9 +126,10 @@ export default function HomeScreen() {
     })
   ).current;
 
-  // Auto-scroll carousel every 3.5 s
+  // Auto-scroll carousel every 3.5 s (사용자가 직접 스와이프 중일 때는 멈춤)
   useEffect(() => {
     const iv = setInterval(() => {
+      if (isUserScrolling.current) return;
       setCarouselIndex((prev) => {
         const next = (prev + 1) % MOCK_CONCERTS.length;
         try {
@@ -149,11 +151,16 @@ export default function HomeScreen() {
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         {/* ── Header ── */}
         <View style={s.header}>
-          <TouchableOpacity onPress={openDrawer} style={s.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity onPress={openDrawer} style={s.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityLabel="메뉴 열기">
             <Ionicons name="menu" size={26} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={s.brand}>TicketPro</Text>
-          <TouchableOpacity style={s.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity
+            style={s.iconBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="검색"
+            onPress={() => Alert.alert('검색', '검색 기능은 아직 준비 중입니다.')}
+          >
             <Ionicons name="search-outline" size={22} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
@@ -176,7 +183,11 @@ export default function HomeScreen() {
                 offset: (CARD_W + CARD_GAP) * i,
                 index: i,
               })}
+              onScrollBeginDrag={() => {
+                isUserScrolling.current = true;
+              }}
               onMomentumScrollEnd={(e) => {
+                isUserScrolling.current = false;
                 const i = Math.round(
                   e.nativeEvent.contentOffset.x / (CARD_W + CARD_GAP)
                 );
@@ -305,41 +316,49 @@ export default function HomeScreen() {
           <View style={s.section}>
             <View style={s.sectionHeader}>
               <Text style={s.sectionTitle}>지금 주목받는 공연</Text>
-              <TouchableOpacity>
+              <TouchableOpacity onPress={() => Alert.alert('전체보기', '전체보기 화면은 아직 준비 중입니다.')} accessibilityLabel="전체보기">
                 <Text style={s.sectionMore}>전체보기</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.smallRow}
-            >
-              {filtered.map((item) => (
-                <SmallCard key={item.id} item={item} />
-              ))}
-            </ScrollView>
+            {filtered.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={s.smallRow}
+              >
+                {filtered.map((item) => (
+                  <SmallCard key={item.id} item={item} />
+                ))}
+              </ScrollView>
+            ) : (
+              <Text style={s.emptyCategoryText}>이 카테고리의 공연이 아직 없어요</Text>
+            )}
           </View>
 
           {/* ── 이번 주 인기 ── */}
           <View style={[s.section, { marginBottom: 48 }]}>
             <View style={s.sectionHeader}>
               <Text style={s.sectionTitle}>이번 주 인기</Text>
-              <TouchableOpacity>
+              <TouchableOpacity onPress={() => Alert.alert('전체보기', '전체보기 화면은 아직 준비 중입니다.')} accessibilityLabel="전체보기">
                 <Text style={s.sectionMore}>전체보기</Text>
               </TouchableOpacity>
             </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={s.smallRow}
-            >
-              {[...MOCK_CONCERTS]
-                .reverse()
-                .slice(0, 5)
-                .map((item) => (
-                  <SmallCard key={item.id + '_r'} item={item} />
-                ))}
-            </ScrollView>
+            {filtered.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={s.smallRow}
+              >
+                {[...filtered]
+                  .reverse()
+                  .slice(0, 5)
+                  .map((item) => (
+                    <SmallCard key={item.id + '_r'} item={item} />
+                  ))}
+              </ScrollView>
+            ) : (
+              <Text style={s.emptyCategoryText}>이 카테고리의 공연이 아직 없어요</Text>
+            )}
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -372,7 +391,7 @@ export default function HomeScreen() {
                 <Ionicons name="wallet-outline" size={20} color="#E11D48" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.drawerLoginTitle}>이재훈</Text>{/* TODO: API에서 이름 받아오기 */}
+                <Text style={s.drawerLoginTitle}>TicketPro 회원</Text>{/* TODO: API에서 실명 받아오기 */}
                 <Text style={[s.drawerLoginSub, { color: '#6B7280' }]}>{shortAddr}</Text>
               </View>
               <TouchableOpacity
@@ -382,8 +401,9 @@ export default function HomeScreen() {
                   Alert.alert('로그아웃', '로그아웃되었습니다.');
                 }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="로그아웃"
               >
-                <Ionicons name="log-out-outline" size={20} color="#374151" />
+                <Ionicons name="log-out-outline" size={20} color="#9CA3AF" />
               </TouchableOpacity>
             </View>
           ) : (
@@ -402,7 +422,7 @@ export default function HomeScreen() {
                 <Text style={s.drawerLoginTitle}>로그인 해주세요</Text>
                 <Text style={s.drawerLoginSub}>지갑으로 로그인 →</Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color="#374151" />
+              <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
             </TouchableOpacity>
           )}
 
@@ -437,7 +457,7 @@ export default function HomeScreen() {
               }}
             >
               <Text style={s.drawerCatText}>{cat}</Text>
-              <Ionicons name="chevron-forward" size={13} color="#374151" />
+              <Ionicons name="chevron-forward" size={13} color="#9CA3AF" />
             </TouchableOpacity>
           ))}
         </SafeAreaView>
@@ -550,8 +570,9 @@ const s = StyleSheet.create({
     marginBottom: 14,
   },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
-  sectionMore: { fontSize: 12, color: '#374151' },
+  sectionMore: { fontSize: 12, color: '#9CA3AF' },
   smallRow: { paddingHorizontal: 20, gap: 12 },
+  emptyCategoryText: { fontSize: 13, color: '#9CA3AF', paddingHorizontal: 20, paddingVertical: 8 },
   /* Small cards */
   smallCard: { width: 130 },
   smallPoster: {
@@ -585,7 +606,7 @@ const s = StyleSheet.create({
     color: '#FFFFFF',
     lineHeight: 18,
   },
-  smallArtist: { fontSize: 11, color: '#4B5563', marginTop: 2 },
+  smallArtist: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
   /* Drawer */
   drawer: {
     position: 'absolute',
@@ -636,7 +657,7 @@ const s = StyleSheet.create({
   drawerMenuText: { fontSize: 14, color: '#9CA3AF', fontWeight: '500' },
   drawerCatLabel: {
     fontSize: 11,
-    color: '#374151',
+    color: '#9CA3AF',
     fontWeight: '700',
     letterSpacing: 0.8,
     paddingHorizontal: 20,

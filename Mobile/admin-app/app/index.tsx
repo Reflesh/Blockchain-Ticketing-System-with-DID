@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, StyleSheet, Text, TouchableWithoutFeedback, View } from 'react-native';
 
 export default function SplashScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -17,25 +17,31 @@ export default function SplashScreen() {
   }, []);
 
   return (
-    <View style={styles.container}>
-      <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
-        <View style={styles.logoWrap}>
-          <Text style={styles.logoT}>T</Text>
-        </View>
-        <Text style={styles.brand}>TicketPro</Text>
-        <View style={styles.adminBadge}>
-          <Text style={styles.adminBadgeText}>관리자 전용</Text>
-        </View>
-        <Text style={styles.tagline}>블록체인 기반 티켓 입장 시스템</Text>
-      </Animated.View>
-    </View>
+    <TouchableWithoutFeedback
+      accessibilityLabel="눌러서 건너뛰기"
+      onPress={() => router.replace('/main')}
+    >
+      <View style={styles.container}>
+        <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
+          <View style={styles.logoWrap}>
+            <Text style={styles.logoT}>T</Text>
+          </View>
+          <Text style={styles.brand}>TicketPro</Text>
+          <View style={styles.adminBadge}>
+            <Text style={styles.adminBadgeText}>관리자 전용</Text>
+          </View>
+          <Text style={styles.tagline}>블록체인 기반 티켓 입장 시스템</Text>
+          <Text style={styles.skipHint}>화면을 누르면 바로 이동해요</Text>
+        </Animated.View>
+      </View>
+    </TouchableWithoutFeedback>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F1A',
+    backgroundColor: '#0A0A14',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -55,4 +61,5 @@ const styles = StyleSheet.create({
   },
   adminBadgeText: { color: '#E11D48', fontSize: 12, fontWeight: '600' },
   tagline: { fontSize: 13, color: '#8E8EA0', marginTop: 4 },
+  skipHint: { fontSize: 11, color: '#8E8EA0', marginTop: 18 },
 });

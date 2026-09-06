@@ -119,7 +119,7 @@ export default function MyPageScreen() {
   if (loading) return <View style={s.loadingBox}><ActivityIndicator size="large" color="#E11D48" /></View>;
 
   // TODO: 백엔드 연동 시 실명 API 응답으로 교체
-  const displayName = '이재훈';
+  const displayName = 'TicketPro 회원';
   const totalMinted = bookings.reduce((sum, b) => sum + b.items.filter(i => i.token_id).length, 0);
 
   return (
@@ -132,8 +132,8 @@ export default function MyPageScreen() {
             <Text style={s.walletAddr}>{shortAddr(address)}</Text>
           </View>
         </View>
-        <TouchableOpacity onPress={handleLogout} style={s.logoutBtn}>
-          <Ionicons name="log-out-outline" size={18} color="#4B5563" />
+        <TouchableOpacity onPress={handleLogout} style={s.logoutBtn} accessibilityLabel="로그아웃" hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}>
+          <Ionicons name="log-out-outline" size={18} color="#9CA3AF" />
         </TouchableOpacity>
       </View>
 
@@ -173,19 +173,19 @@ const s = StyleSheet.create({
   avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#E11D48', justifyContent: 'center', alignItems: 'center' },
   avatarText: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
   displayName: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
-  walletAddr: { fontSize: 11, color: '#374151', marginTop: 2, fontFamily: 'monospace' },
-  logoutBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
+  walletAddr: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontFamily: 'monospace' },
+  logoutBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
   statsBar: { flexDirection: 'row', marginHorizontal: 20, marginBottom: 6, backgroundColor: '#13131F', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', paddingVertical: 16 },
   statItem: { flex: 1, alignItems: 'center' },
   statValue: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
-  statLabel: { fontSize: 10, color: '#374151', marginTop: 4, letterSpacing: 0.2 },
+  statLabel: { fontSize: 10, color: '#9CA3AF', marginTop: 4, letterSpacing: 0.2 },
   statDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.06)' },
   list: { padding: 20, gap: 16, paddingBottom: 48 },
-  sectionLabel: { fontSize: 12, fontWeight: '600', color: '#374151', letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' },
+  sectionLabel: { fontSize: 12, fontWeight: '600', color: '#9CA3AF', letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' },
   empty: { alignItems: 'center', paddingVertical: 80, gap: 12 },
   emptyIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.04)', justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
   emptyTitle: { fontSize: 17, fontWeight: '600', color: '#FFFFFF' },
-  emptySub: { fontSize: 13, color: '#374151', textAlign: 'center', lineHeight: 20 },
+  emptySub: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', lineHeight: 20 },
 });
 
 const tc = StyleSheet.create({

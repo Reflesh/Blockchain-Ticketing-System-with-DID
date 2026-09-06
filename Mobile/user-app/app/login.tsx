@@ -114,9 +114,9 @@ export default function LoginScreen() {
               <Text style={[s.stepLabel, step1Done && s.stepLabelDone]}>키스토어 파일 선택</Text>
             </View>
 
-            <TouchableOpacity style={[s.fileBtn, keystoreJson && s.fileBtnDone]} onPress={pickKeystoreFile} activeOpacity={0.7}>
+            <TouchableOpacity style={[s.fileBtn, keystoreJson && s.fileBtnDone]} onPress={pickKeystoreFile} activeOpacity={0.7} accessibilityLabel="키스토어 파일 선택">
               <View style={[s.fileIconBox, keystoreJson && s.fileIconBoxDone]}>
-                <Ionicons name={keystoreJson ? 'document-text' : 'folder-open-outline'} size={22} color={keystoreJson ? '#E11D48' : '#4B5563'} />
+                <Ionicons name={keystoreJson ? 'document-text' : 'folder-open-outline'} size={22} color={keystoreJson ? '#E11D48' : '#9CA3AF'} />
               </View>
               <View style={s.fileTextBox}>
                 <Text style={[s.filePrimary, keystoreJson && s.filePrimaryDone]} numberOfLines={1}>
@@ -138,18 +138,22 @@ export default function LoginScreen() {
             </View>
 
             <View style={s.inputRow}>
-              <Ionicons name="lock-closed-outline" size={17} color="#4B5563" style={{ marginRight: 10 }} />
+              <Ionicons name="lock-closed-outline" size={17} color="#9CA3AF" style={{ marginRight: 10 }} />
               <TextInput
                 style={s.input}
                 placeholder="키스토어 비밀번호"
-                placeholderTextColor="#374151"
+                placeholderTextColor="#9CA3AF"
                 secureTextEntry={!showPassword}
                 value={password}
                 onChangeText={setPassword}
                 onSubmitEditing={unlockAndLogin}
               />
-              <TouchableOpacity onPress={() => setShowPassword(v => !v)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color="#4B5563" />
+              <TouchableOpacity
+                onPress={() => setShowPassword(v => !v)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel={showPassword ? '비밀번호 숨기기' : '비밀번호 보기'}
+              >
+                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color="#9CA3AF" />
               </TouchableOpacity>
             </View>
 
@@ -189,7 +193,7 @@ const s = StyleSheet.create({
   },
   logoT: { fontSize: 38, fontWeight: '800', color: '#FFFFFF' },
   brand: { fontSize: 28, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.8 },
-  headerSub: { fontSize: 14, color: '#4B5563' },
+  headerSub: { fontSize: 14, color: '#9CA3AF' },
   card: { backgroundColor: '#13131F', borderRadius: 24, padding: 24, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   stepHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
   stepBadge: {
@@ -198,8 +202,8 @@ const s = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   stepBadgeDone: { backgroundColor: '#E11D48', borderColor: '#E11D48' },
-  stepBadgeText: { fontSize: 11, fontWeight: '700', color: '#4B5563' },
-  stepLabel: { fontSize: 12, fontWeight: '600', color: '#4B5563', letterSpacing: 0.3 },
+  stepBadgeText: { fontSize: 11, fontWeight: '700', color: '#9CA3AF' },
+  stepLabel: { fontSize: 12, fontWeight: '600', color: '#9CA3AF', letterSpacing: 0.3 },
   stepLabelDone: { color: '#FFFFFF' },
   fileBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
@@ -210,7 +214,7 @@ const s = StyleSheet.create({
   fileIconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
   fileIconBoxDone: { backgroundColor: 'rgba(225,29,72,0.1)' },
   fileTextBox: { flex: 1 },
-  filePrimary: { fontSize: 14, color: '#4B5563', fontWeight: '500' },
+  filePrimary: { fontSize: 14, color: '#9CA3AF', fontWeight: '500' },
   filePrimaryDone: { color: '#FFFFFF' },
   fileSecondary: { fontSize: 11, color: '#2D2D40', marginTop: 2 },
   inputRow: {

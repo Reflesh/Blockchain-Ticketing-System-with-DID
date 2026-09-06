@@ -163,7 +163,7 @@ function LoginScreen({
             <TextInput
               style={s.input}
               placeholder="관리자 아이디"
-              placeholderTextColor="#4A4A6A"
+              placeholderTextColor="#8E8EA0"
               autoCapitalize="none"
               value={loginId}
               onChangeText={setLoginId}
@@ -172,7 +172,7 @@ function LoginScreen({
             <TextInput
               style={s.input}
               placeholder="비밀번호"
-              placeholderTextColor="#4A4A6A"
+              placeholderTextColor="#8E8EA0"
               secureTextEntry
               value={password}
               onChangeText={setPassword}
@@ -296,7 +296,7 @@ function ScannerScreen({
             {adminInfo?.display_name ?? adminInfo?.login_id ?? '관리자'}
           </Text>
         </View>
-        <TouchableOpacity style={s.topBarBadge} onPress={onLogout}>
+        <TouchableOpacity style={s.topBarBadge} onPress={onLogout} accessibilityLabel="로그아웃">
           <Text style={s.topBarBadgeText}>로그아웃</Text>
         </TouchableOpacity>
       </View>
@@ -350,7 +350,7 @@ function ResultScreen({
   const bgColor = isPass ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)';
 
   return (
-    <SafeAreaView style={[s.safe, { backgroundColor: '#0F0F1A' }]}>
+    <SafeAreaView style={[s.safe, { backgroundColor: '#0A0A14' }]}>
       <View style={[s.resultContainer, { backgroundColor: bgColor }]}>
         <View style={[s.resultIconBox, { borderColor: accentColor }]}>
           <Text style={[s.resultIconText, { color: accentColor }]}>
@@ -390,7 +390,7 @@ function ResultScreen({
 // 스타일
 // ─────────────────────────────────────────
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#0F0F1A' },
+  safe: { flex: 1, backgroundColor: '#0A0A14' },
   center: { justifyContent: 'center', alignItems: 'center', padding: 24, gap: 16 },
   loginScroll: {
     flexGrow: 1, paddingHorizontal: 24,

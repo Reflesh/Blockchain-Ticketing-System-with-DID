@@ -22,11 +22,11 @@ export default function ConcertDetailScreen() {
   if (!concert) {
     return (
       <SafeAreaView style={s.safe}>
-        <TouchableOpacity style={s.errorBack} onPress={() => router.back()}>
+        <TouchableOpacity style={s.errorBack} onPress={() => router.back()} accessibilityLabel="돌아가기">
           <Ionicons name="chevron-back" size={20} color="#fff" />
           <Text style={{ color: '#fff', fontSize: 15 }}>돌아가기</Text>
         </TouchableOpacity>
-        <Text style={{ color: '#4B5563', padding: 20 }}>
+        <Text style={{ color: '#9CA3AF', padding: 20 }}>
           공연 정보를 찾을 수 없습니다.
         </Text>
       </SafeAreaView>
@@ -44,7 +44,7 @@ export default function ConcertDetailScreen() {
           {concert.title[0]}
         </Text>
         <SafeAreaView edges={['top']}>
-          <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={s.backBtn} onPress={() => router.back()} accessibilityLabel="돌아가기">
             <View style={s.backPill}>
               <Ionicons name="chevron-back" size={16} color="#FFFFFF" />
               <Text style={s.backText}>돌아가기</Text>
@@ -321,7 +321,7 @@ const s = StyleSheet.create({
   },
   infoLabel: {
     fontSize: 10,
-    color: '#4B5563',
+    color: '#9CA3AF',
     fontWeight: '600',
     marginTop: 2,
   },
@@ -346,7 +346,7 @@ const s = StyleSheet.create({
     alignItems: 'center',
     position: 'relative',
   },
-  tabText: { fontSize: 13, color: '#4B5563', fontWeight: '600' },
+  tabText: { fontSize: 13, color: '#9CA3AF', fontWeight: '600' },
   tabUnderline: {
     position: 'absolute',
     bottom: 0,
@@ -375,7 +375,7 @@ const s = StyleSheet.create({
   row: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
   rowKey: {
     fontSize: 12,
-    color: '#4B5563',
+    color: '#9CA3AF',
     fontWeight: '600',
     width: 60,
     paddingTop: 1,
@@ -390,7 +390,7 @@ const s = StyleSheet.create({
     paddingVertical: 64,
     gap: 12,
   },
-  emptyTitle: { fontSize: 15, color: '#374151', fontWeight: '600' },
+  emptyTitle: { fontSize: 15, color: '#9CA3AF', fontWeight: '600' },
   emptySub: { fontSize: 13, color: '#1F1F30' },
   /* CTA */
   ctaWrap: {

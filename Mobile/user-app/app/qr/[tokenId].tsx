@@ -163,7 +163,7 @@ export default function QRScreen() {
       <View style={[s.topGlow, { backgroundColor: accentColor + '15' }]} />
 
       {/* 뒤로가기 */}
-      <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
+      <TouchableOpacity style={s.backBtn} onPress={() => router.back()} accessibilityLabel="돌아가기">
         <View style={s.backPill}>
           <Ionicons name="chevron-back" size={16} color="#FFFFFF" />
           <Text style={s.backText}>돌아가기</Text>
@@ -217,17 +217,17 @@ export default function QRScreen() {
       {/* 보안 배지 */}
       <View style={s.secRow}>
         <View style={s.secBadge}>
-          <Ionicons name="eye-off-outline" size={12} color="#374151" />
+          <Ionicons name="eye-off-outline" size={12} color="#9CA3AF" />
           <Text style={s.secText}>캡처 차단</Text>
         </View>
         <View style={s.secDot} />
         <View style={s.secBadge}>
-          <Ionicons name="sunny-outline" size={12} color="#374151" />
+          <Ionicons name="sunny-outline" size={12} color="#9CA3AF" />
           <Text style={s.secText}>밝기 최대</Text>
         </View>
         <View style={s.secDot} />
         <View style={s.secBadge}>
-          <Ionicons name="shield-checkmark-outline" size={12} color="#374151" />
+          <Ionicons name="shield-checkmark-outline" size={12} color="#9CA3AF" />
           <Text style={s.secText}>서명 검증</Text>
         </View>
       </View>
@@ -271,7 +271,7 @@ const s = StyleSheet.create({
     gap: 14,
   },
   eventTitle: { fontSize: 15, fontWeight: '700', color: '#FFFFFF', marginBottom: 3 },
-  eventMeta: { fontSize: 12, color: '#4B5563', marginTop: 1 },
+  eventMeta: { fontSize: 12, color: '#9CA3AF', marginTop: 1 },
   seatBadge: {
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -308,7 +308,7 @@ const s = StyleSheet.create({
   countdown: { alignItems: 'center', gap: 6 },
   ringNum: { fontSize: 20, fontWeight: '700', color: '#FFFFFF' },
   ringNumWarn: { color: '#F59E0B' },
-  countdownLabel: { fontSize: 11, color: '#4B5563' },
+  countdownLabel: { fontSize: 11, color: '#9CA3AF' },
   /* 보안 배지 */
   secRow: {
     flexDirection: 'row',
@@ -318,6 +318,6 @@ const s = StyleSheet.create({
     gap: 10,
   },
   secBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  secText: { fontSize: 11, color: '#374151' },
+  secText: { fontSize: 11, color: '#9CA3AF' },
   secDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#1F1F30' },
 });
