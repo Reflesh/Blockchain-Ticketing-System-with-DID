@@ -72,7 +72,7 @@ function TicketCard({ booking, onSeatPress }: { booking: Booking; onSeatPress: (
               <View style={[tc.statusDot, { backgroundColor: seat.token_id ? '#10B981' : '#F59E0B' }]} />
               <Text style={tc.seatCode}>{seat.seat_code}</Text>
               {!seat.token_id && (
-                <View style={tc.pendingBadge}><Text style={tc.pendingText}>처리 중</Text></View>
+                <View style={tc.pendingBadge}><Text style={tc.pendingText}>발급 중</Text></View>
               )}
             </View>
             {seat.token_id

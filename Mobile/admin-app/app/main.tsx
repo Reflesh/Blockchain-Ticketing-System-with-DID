@@ -1,6 +1,6 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -211,14 +211,18 @@ function ScannerScreen({
 }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [result, setResult] = useState<ScanResult>(null);
+  const [manualMode, setManualMode] = useState(false);
+  const [manualCode, setManualCode] = useState('');
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const scanLock = useRef(false); // 중복 스캔 방지
 
   const frameLeft = (width - FRAME_SIZE) / 2;
   const frameTop = (height - FRAME_SIZE) / 2;
 
   const handleScan = ({ data }: { data: string }) => {
-    if (result) return;
+    if (scanLock.current) return;
+    scanLock.current = true;
     const verified = mockVerifyCheckin(data);
     Haptics.notificationAsync(
       verified.valid
@@ -226,6 +230,25 @@ function ScannerScreen({
         : Haptics.NotificationFeedbackType.Error
     );
     setResult(verified);
+  };
+
+  const handleRescan = () => {
+    setResult(null);
+    scanLock.current = false; // 재스캔 시 잠금 해제
+  };
+
+  const handleManualVerify = () => {
+    const code = manualCode.replace(/\s/g, '');
+    if (code.length !== 6 || !/^\d{6}$/.test(code)) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('입력 오류', '6자리 숫자를 입력해주세요.');
+      return;
+    }
+    // ⚠️ 개발용 — 실제 배포 시 서버에서 코드 검증 필요
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setResult({ valid: true, reason: '코드 수동 인증 완료', tokenId: undefined });
+    setManualCode('');
+    setManualMode(false);
   };
 
   if (!permission) {
@@ -252,7 +275,7 @@ function ScannerScreen({
       <ResultScreen
         result={result}
         adminInfo={adminInfo}
-        onRescan={() => setResult(null)}
+        onRescan={handleRescan}
       />
     );
   }
@@ -296,10 +319,49 @@ function ScannerScreen({
             {adminInfo?.display_name ?? adminInfo?.login_id ?? '관리자'}
           </Text>
         </View>
-        <TouchableOpacity style={s.topBarBadge} onPress={onLogout} accessibilityLabel="로그아웃">
-          <Text style={s.topBarBadgeText}>로그아웃</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity
+            style={[s.topBarBadge, manualMode && s.topBarBadgeActive]}
+            onPress={() => { setManualMode(v => !v); setManualCode(''); }}
+            accessibilityLabel="코드 입력 모드"
+          >
+            <Text style={s.topBarBadgeText}>코드 입력</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.topBarBadge} onPress={onLogout} accessibilityLabel="로그아웃">
+            <Text style={s.topBarBadgeText}>로그아웃</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {/* 수동 코드 입력 패널 */}
+      {manualMode && (
+        <View style={[s.manualPanel, { top: insets.top + 56 }]}>
+          <Text style={s.manualTitle}>수동 코드 인증</Text>
+          <Text style={s.manualSub}>QR 화면에 표시된 6자리 숫자를 입력하세요</Text>
+          <View style={s.manualInputRow}>
+            <TextInput
+              style={s.manualInput}
+              placeholder="000 000"
+              placeholderTextColor="#4B5563"
+              keyboardType="number-pad"
+              maxLength={7}
+              value={manualCode}
+              onChangeText={(t) => {
+                const digits = t.replace(/\D/g, '').slice(0, 6);
+                setManualCode(digits.length > 3 ? digits.slice(0, 3) + ' ' + digits.slice(3) : digits);
+              }}
+              autoFocus
+            />
+            <TouchableOpacity
+              style={[s.manualConfirmBtn, manualCode.replace(/\s/g,'').length !== 6 && { opacity: 0.4 }]}
+              onPress={handleManualVerify}
+              disabled={manualCode.replace(/\s/g,'').length !== 6}
+            >
+              <Text style={s.manualConfirmText}>확인</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* ⚠️ 개발용 — 실제 QR 스캔 없이 결과 화면 확인용. 배포 전 제거할 것 */}
       <View style={[s.testBtnWrap, { bottom: insets.bottom + 24 }]}>
@@ -452,7 +514,31 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
     paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20,
   },
+  topBarBadgeActive: {
+    backgroundColor: 'rgba(34,197,94,0.7)',
+  },
   topBarBadgeText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  manualPanel: {
+    position: 'absolute', left: 16, right: 16,
+    backgroundColor: '#0F0F1E',
+    borderRadius: 20, padding: 20, gap: 8,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+  },
+  manualTitle: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
+  manualSub: { fontSize: 12, color: '#9CA3AF', marginBottom: 4 },
+  manualInputRow: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  manualInput: {
+    flex: 1, backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14,
+    fontSize: 24, fontWeight: '700', color: '#FFFFFF',
+    fontFamily: 'monospace', letterSpacing: 6, textAlign: 'center',
+  },
+  manualConfirmBtn: {
+    backgroundColor: '#22C55E', borderRadius: 12,
+    paddingHorizontal: 20, paddingVertical: 14,
+  },
+  manualConfirmText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   permText: { fontSize: 16, color: '#FFFFFF', textAlign: 'center', lineHeight: 24 },
   permBtn: { backgroundColor: '#E11D48', paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14 },
   permBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
@@ -489,4 +575,4 @@ const s = StyleSheet.create({
   rescanText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   resultFooter: { alignItems: 'center', paddingBottom: 24 },
   resultFooterText: { color: '#3A3A5A', fontSize: 13 },
-});s
+});

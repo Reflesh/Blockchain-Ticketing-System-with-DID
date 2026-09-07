@@ -86,6 +86,7 @@ export default function QRScreen() {
 
   const { wallet, address } = useWallet();
   const [qrValue, setQrValue] = useState<string | null>(null);
+  const [entryCode, setEntryCode] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(REFRESH_INTERVAL);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -140,6 +141,7 @@ export default function QRScreen() {
       : 'mock-dev-signature';
 
     setQrValue(JSON.stringify({ payload, signature }));
+    setEntryCode(String(Math.floor(Math.random() * 1000000)).padStart(6, '0'));
     setSecondsLeft(REFRESH_INTERVAL);
     pulse();
   }, [wallet, address, tokenId, pulse]);
@@ -204,6 +206,17 @@ export default function QRScreen() {
             <View style={s.qrPlaceholder}>
               <Text style={s.qrPlaceholderText}>QR 생성 중...</Text>
             </View>
+          )}
+          {entryCode && (
+            <>
+              <View style={s.codeDivider} />
+              <View style={s.codeBox}>
+                <Text style={s.codeLabel}>수동 입력 코드</Text>
+                <Text style={s.codeValue}>
+                  {entryCode.slice(0, 3)} {entryCode.slice(3)}
+                </Text>
+              </View>
+            </>
           )}
         </Animated.View>
 
@@ -320,4 +333,14 @@ const s = StyleSheet.create({
   secBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   secText: { fontSize: 11, color: '#9CA3AF' },
   secDot: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#1F1F30' },
+  /* 수동 입력 코드 */
+  codeDivider: { height: 1, backgroundColor: '#E5E7EB', marginTop: 16, marginHorizontal: -20 },
+  codeBox: {
+    alignItems: 'center',
+    paddingTop: 12,
+    paddingBottom: 4,
+    gap: 4,
+  },
+  codeLabel: { fontSize: 10, color: '#6B7280', fontWeight: '600', letterSpacing: 0.6 },
+  codeValue: { fontSize: 26, fontWeight: '700', color: '#0A0A14', fontFamily: 'monospace', letterSpacing: 6 },
 });

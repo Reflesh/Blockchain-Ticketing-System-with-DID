@@ -3,14 +3,15 @@ import { useWallet } from '@/context/WalletContext';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
   Dimensions,
   FlatList,
+  Modal,
   PanResponder,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -39,23 +40,47 @@ function SmallCard({ item }: { item: Concert }) {
         <Text style={[s.smallBgLetter, { color: item.accentColor }]}>
           {item.title[0]}
         </Text>
-        <View
-          style={[
-            s.smallGenreBadge,
-            { backgroundColor: item.accentColor + '28' },
-          ]}
-        >
-          <Text style={[s.smallGenreText, { color: item.accentColor }]}>
-            {item.genre}
-          </Text>
+        <View style={[s.smallGenreBadge, { backgroundColor: item.accentColor + '28' }]}>
+          <Text style={[s.smallGenreText, { color: item.accentColor }]}>{item.genre}</Text>
         </View>
       </View>
-      <Text style={s.smallTitle} numberOfLines={2}>
-        {item.title}
-      </Text>
-      <Text style={s.smallArtist} numberOfLines={1}>
-        {item.artist}
-      </Text>
+      <Text style={s.smallTitle} numberOfLines={2}>{item.title}</Text>
+      <Text style={s.smallArtist} numberOfLines={1}>{item.artist}</Text>
+    </TouchableOpacity>
+  );
+}
+
+// ─── List card (전체보기 / 검색 결과) ────────────────────
+function ListCard({ item }: { item: Concert }) {
+  return (
+    <TouchableOpacity
+      style={s.listCard}
+      activeOpacity={0.85}
+      onPress={() =>
+        router.push({
+          pathname: '/concert/[concertId]',
+          params: { concertId: item.id },
+        })
+      }
+    >
+      <View style={[s.listPoster, { backgroundColor: item.posterColor }]}>
+        <Text style={[s.listBgLetter, { color: item.accentColor + '30' }]}>{item.title[0]}</Text>
+        <View style={[s.listGenreBadge, { backgroundColor: item.accentColor + '28' }]}>
+          <Text style={[s.listGenreText, { color: item.accentColor }]}>{item.genre}</Text>
+        </View>
+      </View>
+      <View style={s.listInfo}>
+        <Text style={s.listTitle} numberOfLines={2}>{item.title}</Text>
+        <Text style={s.listArtist} numberOfLines={1}>{item.artist}</Text>
+        <View style={s.listMeta}>
+          <Ionicons name="location-outline" size={11} color="#6B7280" />
+          <Text style={s.listMetaText}>{item.venue}</Text>
+        </View>
+        <View style={s.listMeta}>
+          <Ionicons name="calendar-outline" size={11} color="#6B7280" />
+          <Text style={s.listMetaText}>{item.period}</Text>
+        </View>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -63,9 +88,7 @@ function SmallCard({ item }: { item: Concert }) {
 // ─── Home screen ─────────────────────────────────────────
 export default function HomeScreen() {
   const { address, logout } = useWallet();
-  const shortAddr = address
-    ? `${address.slice(0, 6)}···${address.slice(-4)}`
-    : null;
+  const shortAddr = address ? `${address.slice(0, 6)}···${address.slice(-4)}` : null;
 
   const drawerX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -75,40 +98,38 @@ export default function HomeScreen() {
   const carouselRef = useRef<FlatList>(null);
   const isUserScrolling = useRef(false);
 
+  // 전체보기 모달
+  const [showAllModal, setShowAllModal] = useState(false);
+  const [allModalCategory, setAllModalCategory] = useState('전체');
+
+  // 검색 모달
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const searchResults = searchQuery.trim().length > 0
+    ? MOCK_CONCERTS.filter(
+        (c) =>
+          c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          c.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          c.genre.includes(searchQuery)
+      )
+    : [];
+
   const openDrawer = useCallback(() => {
     setDrawerOpen(true);
     Animated.parallel([
-      Animated.spring(drawerX, {
-        toValue: 0,
-        tension: 65,
-        friction: 11,
-        useNativeDriver: true,
-      }),
-      Animated.timing(backdropOpacity, {
-        toValue: 1,
-        duration: 260,
-        useNativeDriver: true,
-      }),
+      Animated.spring(drawerX, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }),
+      Animated.timing(backdropOpacity, { toValue: 1, duration: 260, useNativeDriver: true }),
     ]).start();
   }, [drawerX, backdropOpacity]);
 
   const closeDrawer = useCallback(() => {
     Animated.parallel([
-      Animated.spring(drawerX, {
-        toValue: -DRAWER_WIDTH,
-        tension: 65,
-        friction: 11,
-        useNativeDriver: true,
-      }),
-      Animated.timing(backdropOpacity, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }),
+      Animated.spring(drawerX, { toValue: -DRAWER_WIDTH, tension: 65, friction: 11, useNativeDriver: true }),
+      Animated.timing(backdropOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
     ]).start(() => setDrawerOpen(false));
   }, [drawerX, backdropOpacity]);
 
-  // Swipe-from-left-edge gesture
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, { dx, dy, moveX }) =>
@@ -126,40 +147,44 @@ export default function HomeScreen() {
     })
   ).current;
 
-  // Auto-scroll carousel every 3.5 s (사용자가 직접 스와이프 중일 때는 멈춤)
   useEffect(() => {
     const iv = setInterval(() => {
       if (isUserScrolling.current) return;
       setCarouselIndex((prev) => {
         const next = (prev + 1) % MOCK_CONCERTS.length;
-        try {
-          carouselRef.current?.scrollToIndex({ index: next, animated: true });
-        } catch {}
+        try { carouselRef.current?.scrollToIndex({ index: next, animated: true }); } catch {}
         return next;
       });
     }, 3500);
     return () => clearInterval(iv);
   }, []);
 
-  const filtered =
-    activeCategory === '전체'
-      ? MOCK_CONCERTS
-      : MOCK_CONCERTS.filter((c) => c.genre === activeCategory);
+  const filtered = activeCategory === '전체'
+    ? MOCK_CONCERTS
+    : MOCK_CONCERTS.filter((c) => c.genre === activeCategory);
+
+  const allModalData = allModalCategory === '전체'
+    ? MOCK_CONCERTS
+    : MOCK_CONCERTS.filter((c) => c.genre === allModalCategory);
+
+  const openAllModal = (category: string) => {
+    setAllModalCategory(category);
+    setShowAllModal(true);
+  };
 
   return (
     <View style={s.root} {...panResponder.panHandlers}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         {/* ── Header ── */}
         <View style={s.header}>
-          <TouchableOpacity onPress={openDrawer} style={s.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityLabel="메뉴 열기">
+          <TouchableOpacity onPress={openDrawer} style={s.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Ionicons name="menu" size={26} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={s.brand}>TicketPro</Text>
           <TouchableOpacity
             style={s.iconBtn}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            accessibilityLabel="검색"
-            onPress={() => Alert.alert('검색', '검색 기능은 아직 준비 중입니다.')}
+            onPress={() => { setSearchQuery(''); setShowSearch(true); }}
           >
             <Ionicons name="search-outline" size={22} color="#FFFFFF" />
           </TouchableOpacity>
@@ -178,136 +203,59 @@ export default function HomeScreen() {
               contentContainerStyle={{ paddingHorizontal: 24 }}
               ItemSeparatorComponent={() => <View style={{ width: CARD_GAP }} />}
               keyExtractor={(item) => item.id}
-              getItemLayout={(_, i) => ({
-                length: CARD_W + CARD_GAP,
-                offset: (CARD_W + CARD_GAP) * i,
-                index: i,
-              })}
-              onScrollBeginDrag={() => {
-                isUserScrolling.current = true;
-              }}
+              getItemLayout={(_, i) => ({ length: CARD_W + CARD_GAP, offset: (CARD_W + CARD_GAP) * i, index: i })}
+              onScrollBeginDrag={() => { isUserScrolling.current = true; }}
               onMomentumScrollEnd={(e) => {
                 isUserScrolling.current = false;
-                const i = Math.round(
-                  e.nativeEvent.contentOffset.x / (CARD_W + CARD_GAP)
-                );
-                setCarouselIndex(
-                  Math.max(0, Math.min(i, MOCK_CONCERTS.length - 1))
-                );
+                const i = Math.round(e.nativeEvent.contentOffset.x / (CARD_W + CARD_GAP));
+                setCarouselIndex(Math.max(0, Math.min(i, MOCK_CONCERTS.length - 1)));
               }}
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[s.carouselCard, { width: CARD_W }]}
                   activeOpacity={0.92}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/concert/[concertId]',
-                      params: { concertId: item.id },
-                    })
-                  }
+                  onPress={() => router.push({ pathname: '/concert/[concertId]', params: { concertId: item.id } })}
                 >
-                  {/* Poster */}
-                  <View
-                    style={[
-                      s.carouselPoster,
-                      { backgroundColor: item.posterColor },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        s.carouselGlow,
-                        { backgroundColor: item.accentColor + '22' },
-                      ]}
-                    />
-                    <Text
-                      style={[
-                        s.carouselBgLetter,
-                        { color: item.accentColor + '18' },
-                      ]}
-                    >
-                      {item.title[0]}
-                    </Text>
+                  <View style={[s.carouselPoster, { backgroundColor: item.posterColor }]}>
+                    <View style={[s.carouselGlow, { backgroundColor: item.accentColor + '22' }]} />
+                    <Text style={[s.carouselBgLetter, { color: item.accentColor + '18' }]}>{item.title[0]}</Text>
                     <View style={s.carouselOverlay}>
-                      <View
-                        style={[
-                          s.genreBadge,
-                          {
-                            backgroundColor: item.accentColor + '28',
-                            borderColor: item.accentColor + '55',
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            s.genreBadgeText,
-                            { color: item.accentColor },
-                          ]}
-                        >
-                          {item.genre}
-                        </Text>
+                      <View style={[s.genreBadge, { backgroundColor: item.accentColor + '28', borderColor: item.accentColor + '55' }]}>
+                        <Text style={[s.genreBadgeText, { color: item.accentColor }]}>{item.genre}</Text>
                       </View>
-                      <Text style={s.carouselTitle} numberOfLines={2}>
-                        {item.title}
-                      </Text>
+                      <Text style={s.carouselTitle} numberOfLines={2}>{item.title}</Text>
                       <Text style={s.carouselArtist}>{item.artist}</Text>
                     </View>
                   </View>
-                  {/* Bottom info */}
                   <View style={s.carouselBottom}>
                     <View style={s.carouselInfoRow}>
-                      <Ionicons
-                        name="location-outline"
-                        size={11}
-                        color="#6B7280"
-                      />
+                      <Ionicons name="location-outline" size={11} color="#6B7280" />
                       <Text style={s.carouselInfoText}>{item.venue}</Text>
                     </View>
                     <View style={s.carouselInfoRow}>
-                      <Ionicons
-                        name="calendar-outline"
-                        size={11}
-                        color="#6B7280"
-                      />
+                      <Ionicons name="calendar-outline" size={11} color="#6B7280" />
                       <Text style={s.carouselInfoText}>{item.period}</Text>
                     </View>
                   </View>
                 </TouchableOpacity>
               )}
             />
-            {/* Indicator dots */}
             <View style={s.dots}>
               {MOCK_CONCERTS.map((_, i) => (
-                <View
-                  key={i}
-                  style={[s.dot, i === carouselIndex && s.dotActive]}
-                />
+                <View key={i} style={[s.dot, i === carouselIndex && s.dotActive]} />
               ))}
             </View>
           </View>
 
           {/* ── Category chips ── */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.catRow}
-          >
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.catRow}>
             {CATEGORIES.map((cat) => (
               <TouchableOpacity
                 key={cat}
-                style={[
-                  s.catChip,
-                  activeCategory === cat && s.catChipActive,
-                ]}
+                style={[s.catChip, activeCategory === cat && s.catChipActive]}
                 onPress={() => setActiveCategory(cat)}
               >
-                <Text
-                  style={[
-                    s.catChipText,
-                    activeCategory === cat && s.catChipTextActive,
-                  ]}
-                >
-                  {cat}
-                </Text>
+                <Text style={[s.catChipText, activeCategory === cat && s.catChipTextActive]}>{cat}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -316,19 +264,13 @@ export default function HomeScreen() {
           <View style={s.section}>
             <View style={s.sectionHeader}>
               <Text style={s.sectionTitle}>지금 주목받는 공연</Text>
-              <TouchableOpacity onPress={() => Alert.alert('전체보기', '전체보기 화면은 아직 준비 중입니다.')} accessibilityLabel="전체보기">
+              <TouchableOpacity onPress={() => openAllModal(activeCategory)}>
                 <Text style={s.sectionMore}>전체보기</Text>
               </TouchableOpacity>
             </View>
             {filtered.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={s.smallRow}
-              >
-                {filtered.map((item) => (
-                  <SmallCard key={item.id} item={item} />
-                ))}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.smallRow}>
+                {filtered.map((item) => <SmallCard key={item.id} item={item} />)}
               </ScrollView>
             ) : (
               <Text style={s.emptyCategoryText}>이 카테고리의 공연이 아직 없어요</Text>
@@ -339,22 +281,15 @@ export default function HomeScreen() {
           <View style={[s.section, { marginBottom: 48 }]}>
             <View style={s.sectionHeader}>
               <Text style={s.sectionTitle}>이번 주 인기</Text>
-              <TouchableOpacity onPress={() => Alert.alert('전체보기', '전체보기 화면은 아직 준비 중입니다.')} accessibilityLabel="전체보기">
+              <TouchableOpacity onPress={() => openAllModal(activeCategory)}>
                 <Text style={s.sectionMore}>전체보기</Text>
               </TouchableOpacity>
             </View>
             {filtered.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={s.smallRow}
-              >
-                {[...filtered]
-                  .reverse()
-                  .slice(0, 5)
-                  .map((item) => (
-                    <SmallCard key={item.id + '_r'} item={item} />
-                  ))}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.smallRow}>
+                {[...filtered].reverse().slice(0, 5).map((item) => (
+                  <SmallCard key={item.id + '_r'} item={item} />
+                ))}
               </ScrollView>
             ) : (
               <Text style={s.emptyCategoryText}>이 카테고리의 공연이 아직 없어요</Text>
@@ -365,17 +300,10 @@ export default function HomeScreen() {
 
       {/* ── Backdrop ── */}
       <Animated.View
-        style={[
-          StyleSheet.absoluteFill,
-          { backgroundColor: 'rgba(0,0,0,0.55)', opacity: backdropOpacity },
-        ]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.55)', opacity: backdropOpacity }]}
         pointerEvents={drawerOpen ? 'auto' : 'none'}
       >
-        <TouchableOpacity
-          style={StyleSheet.absoluteFill}
-          activeOpacity={1}
-          onPress={closeDrawer}
-        />
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closeDrawer} />
       </Animated.View>
 
       {/* ── Drawer panel ── */}
@@ -384,37 +312,21 @@ export default function HomeScreen() {
         pointerEvents={drawerOpen ? 'auto' : 'none'}
       >
         <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom', 'left']}>
-          {/* Login / Profile section */}
           {address ? (
             <View style={s.drawerLogin}>
               <View style={[s.drawerAvatar, { backgroundColor: 'rgba(225,29,72,0.15)', borderColor: 'rgba(225,29,72,0.3)' }]}>
                 <Ionicons name="wallet-outline" size={20} color="#E11D48" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.drawerLoginTitle}>TicketPro 회원</Text>{/* TODO: API에서 실명 받아오기 */}
+                <Text style={s.drawerLoginTitle}>TicketPro 회원</Text>
                 <Text style={[s.drawerLoginSub, { color: '#6B7280' }]}>{shortAddr}</Text>
               </View>
-              <TouchableOpacity
-                onPress={() => {
-                  logout();
-                  closeDrawer();
-                  Alert.alert('로그아웃', '로그아웃되었습니다.');
-                }}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                accessibilityLabel="로그아웃"
-              >
+              <TouchableOpacity onPress={() => { logout(); closeDrawer(); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name="log-out-outline" size={20} color="#9CA3AF" />
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity
-              style={s.drawerLogin}
-              activeOpacity={0.8}
-              onPress={() => {
-                closeDrawer();
-                setTimeout(() => router.push('/login'), 280);
-              }}
-            >
+            <TouchableOpacity style={s.drawerLogin} activeOpacity={0.8} onPress={() => { closeDrawer(); setTimeout(() => router.push('/login'), 280); }}>
               <View style={s.drawerAvatar}>
                 <Ionicons name="person-outline" size={22} color="#6B7280" />
               </View>
@@ -428,16 +340,9 @@ export default function HomeScreen() {
 
           <View style={s.drawerSep} />
 
-          {/* 마이페이지 */}
           <TouchableOpacity
             style={s.drawerMenuItem}
-            onPress={() => {
-              closeDrawer();
-              setTimeout(() => {
-                if (address) router.push('/mypage');
-                else router.push('/login');
-              }, 280);
-            }}
+            onPress={() => { closeDrawer(); setTimeout(() => { if (address) router.push('/mypage'); else router.push('/login'); }, 280); }}
           >
             <Ionicons name="ticket-outline" size={18} color="#6B7280" />
             <Text style={s.drawerMenuText}>마이페이지</Text>
@@ -445,7 +350,6 @@ export default function HomeScreen() {
 
           <View style={s.drawerSep} />
 
-          {/* Categories */}
           <Text style={s.drawerCatLabel}>카테고리</Text>
           {CATEGORIES.filter((c) => c !== '전체').map((cat) => (
             <TouchableOpacity
@@ -454,6 +358,7 @@ export default function HomeScreen() {
               onPress={() => {
                 setActiveCategory(cat);
                 closeDrawer();
+                setTimeout(() => openAllModal(cat), 300);
               }}
             >
               <Text style={s.drawerCatText}>{cat}</Text>
@@ -462,214 +367,153 @@ export default function HomeScreen() {
           ))}
         </SafeAreaView>
       </Animated.View>
+
+      {/* ── 전체보기 모달 ── */}
+      <Modal visible={showAllModal} animationType="slide" onRequestClose={() => setShowAllModal(false)}>
+        <View style={s.modalRoot}>
+          <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+            <View style={s.modalHeader}>
+              <TouchableOpacity onPress={() => setShowAllModal(false)} style={s.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+              <Text style={s.modalTitle}>{allModalCategory === '전체' ? '전체 공연' : allModalCategory}</Text>
+              <View style={s.iconBtn} />
+            </View>
+            <Text style={s.modalCount}>{allModalData.length}개의 공연</Text>
+            <FlatList
+              data={allModalData}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}
+              ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+              renderItem={({ item }) => <ListCard item={item} />}
+              ListEmptyComponent={<Text style={s.emptyCategoryText}>이 카테고리의 공연이 없어요</Text>}
+            />
+          </SafeAreaView>
+        </View>
+      </Modal>
+
+      {/* ── 검색 모달 ── */}
+      <Modal visible={showSearch} animationType="slide" onRequestClose={() => setShowSearch(false)}>
+        <View style={s.modalRoot}>
+          <SafeAreaView style={{ flex: 1 }} edges={['top']}>
+            <View style={s.searchHeader}>
+              <TouchableOpacity onPress={() => setShowSearch(false)} style={s.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+              <View style={s.searchInputWrap}>
+                <Ionicons name="search-outline" size={16} color="#6B7280" />
+                <TextInput
+                  style={s.searchInput}
+                  placeholder="공연, 아티스트 검색..."
+                  placeholderTextColor="#6B7280"
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  autoFocus
+                  returnKeyType="search"
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <Ionicons name="close-circle" size={16} color="#6B7280" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {searchQuery.trim().length === 0 ? (
+              <View style={s.searchEmpty}>
+                <Ionicons name="search" size={48} color="#2A2A3E" />
+                <Text style={s.searchEmptyText}>공연명 또는 아티스트를 검색하세요</Text>
+              </View>
+            ) : searchResults.length === 0 ? (
+              <View style={s.searchEmpty}>
+                <Ionicons name="alert-circle-outline" size={48} color="#2A2A3E" />
+                <Text style={s.searchEmptyText}>'{searchQuery}'에 대한 결과가 없어요</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={s.modalCount}>{searchResults.length}개의 결과</Text>
+                <FlatList
+                  data={searchResults}
+                  keyExtractor={(item) => item.id}
+                  contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 32 }}
+                  ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+                  renderItem={({ item }) => <ListCard item={item} />}
+                />
+              </>
+            )}
+          </SafeAreaView>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0A0A14' },
-  /* Header */
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12 },
   iconBtn: { padding: 4 },
-  brand: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: -0.5,
-  },
-  /* Carousel card */
-  carouselCard: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: '#13131F',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-  },
-  carouselPoster: {
-    height: 210,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-  },
-  carouselGlow: {
-    position: 'absolute',
-    top: -60,
-    right: -60,
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-  },
-  carouselBgLetter: {
-    position: 'absolute',
-    top: -24,
-    right: -8,
-    fontSize: 190,
-    fontWeight: '900',
-    lineHeight: 210,
-  },
+  brand: { fontSize: 20, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
+  carouselCard: { borderRadius: 20, overflow: 'hidden', backgroundColor: '#13131F', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  carouselPoster: { height: 210, justifyContent: 'flex-end', overflow: 'hidden' },
+  carouselGlow: { position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: 100 },
+  carouselBgLetter: { position: 'absolute', top: -24, right: -8, fontSize: 190, fontWeight: '900', lineHeight: 210 },
   carouselOverlay: { padding: 18, gap: 5 },
-  genreBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-    borderWidth: 1,
-    marginBottom: 2,
-  },
+  genreBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1, marginBottom: 2 },
   genreBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
-  carouselTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    lineHeight: 28,
-  },
+  carouselTitle: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', lineHeight: 28 },
   carouselArtist: { fontSize: 13, color: 'rgba(255,255,255,0.5)' },
   carouselBottom: { backgroundColor: '#13131F', padding: 14, gap: 6 },
   carouselInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   carouselInfoText: { fontSize: 12, color: '#6B7280' },
-  /* Dots */
-  dots: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 5,
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  dot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
+  dots: { flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 12, marginBottom: 4 },
+  dot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: 'rgba(255,255,255,0.12)' },
   dotActive: { width: 18, backgroundColor: '#E11D48', borderRadius: 2.5 },
-  /* Categories */
   catRow: { paddingHorizontal: 20, paddingVertical: 16, gap: 8 },
-  catChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
-  },
+  catChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
   catChipActive: { backgroundColor: '#E11D48', borderColor: '#E11D48' },
   catChipText: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
   catChipTextActive: { color: '#FFFFFF', fontWeight: '700' },
-  /* Sections */
   section: { marginTop: 8 },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    marginBottom: 14,
-  },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, marginBottom: 14 },
   sectionTitle: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
-  sectionMore: { fontSize: 12, color: '#9CA3AF' },
+  sectionMore: { fontSize: 12, color: '#E11D48', fontWeight: '600' },
   smallRow: { paddingHorizontal: 20, gap: 12 },
   emptyCategoryText: { fontSize: 13, color: '#9CA3AF', paddingHorizontal: 20, paddingVertical: 8 },
-  /* Small cards */
   smallCard: { width: 130 },
-  smallPoster: {
-    width: 130,
-    height: 168,
-    borderRadius: 14,
-    justifyContent: 'space-between',
-    padding: 10,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  smallBgLetter: {
-    position: 'absolute',
-    bottom: -10,
-    right: 2,
-    fontSize: 80,
-    fontWeight: '900',
-    opacity: 0.2,
-    lineHeight: 90,
-  },
-  smallGenreBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
-  },
+  smallPoster: { width: 130, height: 168, borderRadius: 14, justifyContent: 'space-between', padding: 10, overflow: 'hidden', marginBottom: 8 },
+  smallBgLetter: { position: 'absolute', bottom: -10, right: 2, fontSize: 80, fontWeight: '900', opacity: 0.2, lineHeight: 90 },
+  smallGenreBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   smallGenreText: { fontSize: 10, fontWeight: '700' },
-  smallTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#FFFFFF',
-    lineHeight: 18,
-  },
+  smallTitle: { fontSize: 13, fontWeight: '600', color: '#FFFFFF', lineHeight: 18 },
   smallArtist: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
-  /* Drawer */
-  drawer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    bottom: 0,
-    width: DRAWER_WIDTH,
-    backgroundColor: '#0F0F1E',
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(255,255,255,0.06)',
-    shadowColor: '#000',
-    shadowOffset: { width: 8, height: 0 },
-    shadowOpacity: 0.45,
-    shadowRadius: 24,
-    elevation: 24,
-  },
-  drawerLogin: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    padding: 20,
-    paddingVertical: 22,
-  },
-  drawerAvatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  listCard: { flexDirection: 'row', backgroundColor: '#13131F', borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  listPoster: { width: 90, height: 110, justifyContent: 'flex-end', padding: 8, overflow: 'hidden' },
+  listBgLetter: { position: 'absolute', bottom: -8, right: 0, fontSize: 60, fontWeight: '900', lineHeight: 70 },
+  listGenreBadge: { alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+  listGenreText: { fontSize: 9, fontWeight: '700' },
+  listInfo: { flex: 1, padding: 12, justifyContent: 'center', gap: 4 },
+  listTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF', lineHeight: 20 },
+  listArtist: { fontSize: 12, color: '#9CA3AF' },
+  listMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  listMetaText: { fontSize: 11, color: '#6B7280' },
+  drawer: { position: 'absolute', top: 0, left: 0, bottom: 0, width: DRAWER_WIDTH, backgroundColor: '#0F0F1E', borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.06)', shadowColor: '#000', shadowOffset: { width: 8, height: 0 }, shadowOpacity: 0.45, shadowRadius: 24, elevation: 24 },
+  drawerLogin: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 20, paddingVertical: 22 },
+  drawerAvatar: { width: 46, height: 46, borderRadius: 23, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', justifyContent: 'center', alignItems: 'center' },
   drawerLoginTitle: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
   drawerLoginSub: { fontSize: 12, color: '#E11D48', marginTop: 3 },
-  drawerSep: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    marginHorizontal: 16,
-  },
-  drawerMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
+  drawerSep: { height: 1, backgroundColor: 'rgba(255,255,255,0.05)', marginHorizontal: 16 },
+  drawerMenuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingVertical: 16 },
   drawerMenuText: { fontSize: 14, color: '#9CA3AF', fontWeight: '500' },
-  drawerCatLabel: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 8,
-  },
-  drawerCatItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 13,
-  },
+  drawerCatLabel: { fontSize: 11, color: '#9CA3AF', fontWeight: '700', letterSpacing: 0.8, paddingHorizontal: 20, paddingTop: 18, paddingBottom: 8 },
+  drawerCatItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 13 },
   drawerCatText: { fontSize: 14, color: '#D1D5DB', fontWeight: '500' },
+  modalRoot: { flex: 1, backgroundColor: '#0A0A14' },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#FFFFFF' },
+  modalCount: { fontSize: 12, color: '#6B7280', paddingHorizontal: 20, paddingBottom: 16 },
+  searchHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12 },
+  searchInputWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#13131F', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, gap: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  searchInput: { flex: 1, fontSize: 14, color: '#FFFFFF' },
+  searchEmpty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  searchEmptyText: { fontSize: 14, color: '#6B7280', textAlign: 'center' },
 });
