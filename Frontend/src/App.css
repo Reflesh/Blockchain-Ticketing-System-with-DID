@@ -418,3 +418,46 @@ body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smooth
   box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.08);
 }
 .companion-input::placeholder { color: #94a3b8; }
+
+/* ── 앱 안내 페이지 ── */
+.appguide-wrapper { padding: 20px; max-width: 860px; margin: 0 auto; }
+.appguide-container { display: flex; flex-direction: column; gap: 36px; padding-bottom: 60px; }
+.appguide-main-title { font-size: 26px; font-weight: 800; color: #0f172a; margin: 12px 0 6px; }
+.appguide-subtitle { font-size: 15px; color: #64748b; margin: 0 0 8px; }
+
+.appguide-section { background: #fff; border-radius: 16px; border: 1px solid #e2e8f0; padding: 28px 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+.appguide-section-title { font-size: 18px; font-weight: 700; color: #0f172a; margin: 0 0 20px; padding-bottom: 12px; border-bottom: 2px solid #f1f5f9; }
+
+/* 다운로드 */
+.appguide-download-box { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
+.appguide-qr-placeholder { width: 160px; height: 160px; border: 2px dashed #cbd5e1; border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #f8fafc; flex-shrink: 0; }
+.appguide-qr-icon { font-size: 36px; }
+.appguide-qr-text { font-size: 12px; font-weight: 600; color: #64748b; margin: 0; text-align: center; }
+.appguide-qr-sub { font-size: 11px; color: #94a3b8; margin: 0; text-align: center; }
+.appguide-download-info { display: flex; flex-direction: column; gap: 14px; flex: 1; min-width: 200px; }
+.appguide-store-badge { display: flex; align-items: center; gap: 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 18px; font-size: 22px; }
+.appguide-store-label { font-size: 11px; color: #94a3b8; margin: 0; }
+.appguide-store-name { font-size: 14px; font-weight: 700; color: #0f172a; margin: 2px 0 0; }
+.appguide-coming-soon { font-size: 12px; color: #94a3b8; margin: 4px 0 0; }
+
+/* 단계별 안내 */
+.appguide-notice-text { font-size: 14px; color: #475569; line-height: 1.7; margin: 0 0 20px; }
+.appguide-steps { display: flex; flex-direction: column; gap: 16px; }
+.appguide-step { display: flex; gap: 16px; align-items: flex-start; }
+.appguide-step-num { width: 32px; height: 32px; border-radius: 50%; background: #e11d48; color: #fff; font-size: 15px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+.appguide-step-content h4 { font-size: 15px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
+.appguide-step-content p { font-size: 13px; color: #475569; line-height: 1.6; margin: 0; }
+.appguide-step-content code { background: #f1f5f9; color: #e11d48; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+.appguide-tip { margin-top: 20px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; padding: 14px 16px; font-size: 13px; color: #92400e; line-height: 1.6; }
+
+/* 공연장 안내 */
+.appguide-info-grid { display: flex; flex-direction: column; gap: 14px; }
+.appguide-info-item { display: flex; align-items: flex-start; gap: 14px; padding: 14px; background: #f8fafc; border-radius: 10px; }
+.appguide-info-icon { font-size: 22px; flex-shrink: 0; }
+.appguide-info-key { font-size: 12px; font-weight: 700; color: #64748b; margin: 0 0 3px; }
+.appguide-info-val { font-size: 14px; color: #0f172a; margin: 0; }
+
+/* 유의사항 */
+.appguide-notice-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.appguide-notice-list li { font-size: 14px; color: #334155; line-height: 1.6; }
+.appguide-notice-list li::marker { color: #e11d48; }

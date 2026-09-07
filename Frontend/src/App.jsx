@@ -387,6 +387,10 @@ function App() {
     setMyPageTab('history')
   }
 
+  const goToAppGuide = () => {
+    setCurrentPage('appguide')
+  }
+
   const handleAdminLogin = async () => {
     try {
       const response = await axios.post(`${TICKET_API_URL}/admin/login`, {
@@ -541,7 +545,7 @@ function App() {
   }
 
   const handleGoBack = () => {
-    if (currentPage === 'detail' || currentPage === 'search' || currentPage === 'login' || currentPage === 'mypage' || currentPage === 'admin') {
+    if (currentPage === 'detail' || currentPage === 'search' || currentPage === 'login' || currentPage === 'mypage' || currentPage === 'admin' || currentPage === 'appguide') {
       setCurrentPage('main')
       window.history.pushState({}, '', '/')
     } else if (currentPage === 'booking') {
@@ -991,6 +995,7 @@ function App() {
           <input type="text" placeholder="어떤 공연을 찾으시나요?" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={handleSearch} />
         </div>
         <div className="nav-menus">
+          <span onClick={goToAppGuide}>📱 앱 안내</span>
           {currentUser ? (
             <>
               <span className="welcome-text" style={{ marginRight: '15px', fontWeight: 'bold' }}>{currentUser.username}님</span>
@@ -1741,6 +1746,88 @@ function App() {
                   </div>
                 )
               )}
+            </div>
+          </div>
+        )}
+
+        {currentPage === 'appguide' && (
+          <div className="appguide-wrapper">
+            <button className="icon-back-btn" onClick={handleGoBack}>⬅</button>
+            <div className="appguide-container">
+              <h2 className="appguide-main-title">📱 TicketPro 모바일 앱 안내</h2>
+              <p className="appguide-subtitle">블록체인 기반 NFT 티켓을 모바일에서도 편리하게 이용하세요.</p>
+
+              {/* ── 앱 다운로드 ── */}
+              <section className="appguide-section">
+                <h3 className="appguide-section-title">앱 다운로드</h3>
+                <div className="appguide-download-box">
+                  <div className="appguide-qr-placeholder">
+                    <span className="appguide-qr-icon">📷</span>
+                    <p className="appguide-qr-text">앱 출시 후 업데이트 예정</p>
+                    <p className="appguide-qr-sub">QR 코드를 스캔하여 앱을 설치하세요</p>
+                  </div>
+                  <div className="appguide-download-info">
+                    <div className="appguide-store-badge">
+                      <span>🤖</span>
+                      <div>
+                        <p className="appguide-store-label">Google Play</p>
+                        <p className="appguide-store-name">Android 앱 다운로드</p>
+                      </div>
+                    </div>
+                    <div className="appguide-store-badge">
+                      <span>🍎</span>
+                      <div>
+                        <p className="appguide-store-label">App Store</p>
+                        <p className="appguide-store-name">iOS 앱 다운로드</p>
+                      </div>
+                    </div>
+                    <p className="appguide-coming-soon">※ 현재 앱 출시 준비 중입니다. 출시 시 업데이트될 예정입니다.</p>
+                  </div>
+                </div>
+              </section>
+
+              {/* ── 모바일 로그인 방법 ── */}
+              <section className="appguide-section">
+                <h3 className="appguide-section-title">모바일 앱 로그인 방법</h3>
+                <p className="appguide-notice-text">
+                  TicketPro는 개인 정보 보호를 위해 <strong>JSON 키 파일 기반 DID 로그인</strong>을 사용합니다.<br/>
+                  모바일에서 로그인하려면 아래 절차를 따라주세요.
+                </p>
+                <div className="appguide-steps">
+                  <div className="appguide-step">
+                    <div className="appguide-step-num">1</div>
+                    <div className="appguide-step-content">
+                      <h4>PC에서 DID 키 파일 발급</h4>
+                      <p>TicketPro 웹사이트에서 <strong>로그인 / DID 발급</strong>을 클릭 후, 부경대 이메일 인증을 통해 키 파일을 발급·다운로드하세요.</p>
+                    </div>
+                  </div>
+                  <div className="appguide-step">
+                    <div className="appguide-step-num">2</div>
+                    <div className="appguide-step-content">
+                      <h4>JSON 파일을 휴대폰으로 전송</h4>
+                      <p>다운로드된 <code>TicketPro_DID_학번.json</code> 파일을 카카오톡, 이메일, USB 등을 통해 휴대폰으로 옮겨주세요.</p>
+                    </div>
+                  </div>
+                  <div className="appguide-step">
+                    <div className="appguide-step-num">3</div>
+                    <div className="appguide-step-content">
+                      <h4>TicketPro 앱 실행 후 파일 선택</h4>
+                      <p>앱을 실행하고 로그인 화면에서 <strong>키 파일 불러오기</strong>를 탭하여 전송받은 JSON 파일을 선택하세요.</p>
+                    </div>
+                  </div>
+                  <div className="appguide-step">
+                    <div className="appguide-step-num">4</div>
+                    <div className="appguide-step-content">
+                      <h4>비밀번호 입력 후 로그인</h4>
+                      <p>키 파일 생성 시 설정한 <strong>비밀번호</strong>를 입력하면 로그인이 완료됩니다. 비밀번호는 분실 시 복구가 불가하니 안전하게 보관하세요.</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="appguide-tip">
+                  💡 <strong>Tip:</strong> 키 파일은 절대 타인에게 공유하지 마세요. 키 파일과 비밀번호가 있으면 누구든 본인 계정으로 로그인이 가능합니다.
+                </div>
+              </section>
+
             </div>
           </div>
         )}
