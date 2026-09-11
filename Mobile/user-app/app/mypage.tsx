@@ -4,12 +4,12 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, RefreshControl,
+  ActivityIndicator, Alert, FlatList, RefreshControl,
   StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const TICKET_API_URL = 'http://13.124.21.176:8000/api';
+import { AUTH_API_URL, TICKET_API_URL } from '@/constants/api';
 
 type BookingItem = { booking_item_id: number; seat_code: string; token_id: number | null; ticket_status: string };
 type Booking = { id: number; booking_no: string; title: string; venue: string; display_time_text: string; poster_color: string; items: BookingItem[] };
@@ -99,7 +99,13 @@ export default function MyPageScreen() {
       const res = await fetch(`${TICKET_API_URL}/users/${address}/bookings`, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      setBookings((data.data ?? []).map((b: any) => ({ ...b, poster_color: '#E11D48' })));
+      setBookings((data.data ?? []).map((b: any) => ({
+        ...b,
+        title: b.title ?? b.name,
+        venue: b.venue ?? b.location,
+        display_time_text: b.display_time_text ?? b.time,
+        poster_color: b.poster_color ?? '#E11D48',
+      })));
     } catch {
       setBookings(MOCK_BOOKINGS);
     } finally {
@@ -109,7 +115,27 @@ export default function MyPageScreen() {
 
   useEffect(() => { loadBookings(); }, [loadBookings]);
 
-  const handleLogout = () => { logout(); router.replace('/login'); };
+  const handleLogout = async () => {
+    const token = accessToken;
+    logout();
+    router.replace('/login');
+    if (!token) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`${AUTH_API_URL}/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_token: token }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error('세션 폐기 실패');
+    } catch {
+      Alert.alert('로그아웃 안내', '기기에서는 로그아웃되었습니다. 서버 연결 문제로 서버 세션 종료는 확인하지 못했습니다.');
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const handleSeatPress = (booking: Booking, seat: BookingItem) => {
     if (!seat.token_id) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);

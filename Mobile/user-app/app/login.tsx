@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-const AUTH_API_URL = 'http://13.125.221.211:8001/api';
+import { AUTH_API_URL } from '@/constants/api';
 
 export default function LoginScreen() {
   const { setSession } = useWallet();

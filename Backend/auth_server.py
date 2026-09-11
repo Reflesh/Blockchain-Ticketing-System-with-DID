@@ -1,18 +1,31 @@
 import os
 import json
 import hashlib
+import math
+import re
 import time
 import secrets
 import smtplib
 import copy
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Union, Optional, List, Dict
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, field_validator
+from fastapi.responses import JSONResponse
+try:
+    from pydantic import BaseModel, field_validator
+except ImportError:
+    from pydantic import BaseModel, validator as _validator
+
+    def field_validator(*fields, **kwargs):
+        def decorator(function):
+            target = function.__func__ if isinstance(function, classmethod) else function
+            return _validator(*fields, allow_reuse=True, **kwargs)(target)
+        return decorator
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_utils import is_checksum_address
@@ -25,7 +38,157 @@ from web3.middleware import ExtraDataToPOAMiddleware
 import psycopg
 from psycopg.rows import dict_row
 
-load_dotenv()
+
+ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+
+def env_bool(name, default=False):
+    value = os.getenv(name, str(default)).strip().lower()
+    if value not in {"true", "false", "1", "0"}:
+        raise ValueError(f"{name}: true 또는 false를 설정하세요.")
+    return value in {"true", "1"}
+
+
+def validate_service_key(key):
+    if len(key) < 32 or not key.isascii() or any(c.isspace() for c in key):
+        raise ValueError("AUTH_SERVICE_KEY는 공백 없는 32자 이상의 ASCII 난수여야 합니다.")
+
+
+@dataclass(frozen=True)
+class ServiceSettings:
+    key: str = ""
+    internal_only: bool = False
+
+    @classmethod
+    def from_env(cls):
+        key = os.getenv("AUTH_SERVICE_KEY", "")
+        internal_only = env_bool("AUTH_INTERNAL_ONLY")
+        if key or internal_only:
+            validate_service_key(key)
+        return cls(key, internal_only)
+
+    def accepts(self, supplied):
+        return bool(self.key and isinstance(supplied, str) and supplied.isascii()
+                    and secrets.compare_digest(self.key, supplied))
+
+
+def expiry_timestamp(value):
+    try:
+        date = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if date.tzinfo is None:
+            return None
+        timestamp = date.timestamp()
+        return timestamp if math.isfinite(timestamp) else None
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+
+
+def inspect_session(connection_factory, token, now):
+    with connection_factory() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT s.wallet_address, s.expires_at,
+                          v.expires_at AS vc_expires_at
+                   FROM user_login_sessions s
+                   JOIN issued_vcs v ON LOWER(v.wallet_address) = LOWER(s.wallet_address)
+                   LEFT JOIN revoked_vcs r ON LOWER(r.wallet_address) = LOWER(s.wallet_address)
+                   WHERE s.token_hash = %s AND s.expires_at > %s
+                     AND s.revoked_at IS NULL AND r.wallet_address IS NULL""",
+                (hashlib.sha256(token.encode("utf-8")).hexdigest(), now))
+            row = cursor.fetchone()
+    if not row:
+        return {"active": False}
+    expiry = expiry_timestamp(row["vc_expires_at"])
+    if expiry is None or expiry <= now:
+        return {"active": False}
+    return {"active": True, "wallet_address": row["wallet_address"],
+            "expires_at": row["expires_at"], "vc_expires_at": expiry}
+
+
+def inspect_credential(connection_factory, address, now):
+    with connection_factory() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT v.expires_at, r.revoked_at
+                   FROM issued_vcs v
+                   LEFT JOIN revoked_vcs r ON LOWER(r.wallet_address) = LOWER(v.wallet_address)
+                   WHERE LOWER(v.wallet_address) = LOWER(%s)""", (address,))
+            row = cursor.fetchone()
+    if not row:
+        return {"valid": False, "reason_code": "NOT_ISSUED"}
+    if row["revoked_at"] is not None:
+        return {"valid": False, "reason_code": "REVOKED"}
+    expiry = expiry_timestamp(row["expires_at"])
+    if expiry is None or expiry <= now:
+        return {"valid": False, "reason_code": "EXPIRED"}
+    return {"valid": True, "reason_code": "ACTIVE", "expires_at": expiry}
+
+
+class ServiceGuardMiddleware:
+    def __init__(self, app, settings):
+        self.app = app
+        self.settings = settings
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        protected = self.settings.internal_only or scope.get("path", "").startswith("/internal/")
+        headers = dict(scope.get("headers", []))
+        supplied = headers.get(b"x-service-key")
+        supplied = supplied.decode("ascii", errors="ignore") if supplied is not None else None
+        if protected and not self.settings.accepts(supplied):
+            code = "AUTH_SERVICE_UNAUTHORIZED" if self.settings.key else "AUTH_SERVICE_NOT_CONFIGURED"
+            response = JSONResponse(status_code=401 if self.settings.key else 503,
+                                    content={"detail": {"code": code,
+                                                        "message": "서버 간 인증이 필요합니다."}},
+                                    headers={"Cache-Control": "no-store"})
+            await response(scope, receive, send)
+            return
+
+        async def send_no_store(message):
+            if message["type"] == "http.response.start":
+                response_headers = [(name, value) for name, value in message.get("headers", [])
+                                    if name.lower() != b"cache-control"]
+                response_headers.append((b"cache-control", b"no-store"))
+                message = {**message, "headers": response_headers}
+            await send(message)
+
+        await self.app(scope, receive, send_no_store)
+
+
+def install_auth_guard(app, settings):
+    app.add_middleware(ServiceGuardMiddleware, settings=settings)
+
+
+def install_internal_auth_routes(app, connection_factory):
+    @app.post("/internal/sessions/introspect", include_in_schema=False)
+    async def introspect(payload: dict = Body(...)):
+        token = payload.get("token")
+        if not isinstance(token, str) or not 1 <= len(token) <= 4096:
+            raise HTTPException(status_code=422, detail="token 형식을 확인하세요.")
+        try:
+            return inspect_session(connection_factory, token, time.time())
+        except Exception:
+            raise HTTPException(status_code=503, detail="인증 저장소를 이용할 수 없습니다.") from None
+
+    @app.post("/internal/credentials/check", include_in_schema=False)
+    async def credential_check(payload: dict = Body(...)):
+        address = payload.get("wallet_address")
+        if not isinstance(address, str) or not ADDRESS.fullmatch(address):
+            raise HTTPException(status_code=422, detail="wallet_address 형식을 확인하세요.")
+        try:
+            return inspect_credential(connection_factory, address, time.time())
+        except Exception:
+            raise HTTPException(status_code=503, detail="인증 저장소를 이용할 수 없습니다.") from None
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
+# 기본값은 기존 공개 경로 유지. 클라이언트 전환 후 내부 전용으로 설정한다.
+AUTH_SERVICE_SETTINGS = ServiceSettings.from_env()
 
 # ──────────────────────────────────────────────
 # 1. 환경 변수 로드 및 Web3 설정
@@ -41,7 +204,7 @@ if not DATABASE_URL:
 DID_CONTRACT_ADDRESS = os.getenv("DID_CONTRACT_ADDRESS")
 DID_CONTRACT_ABI = None
 try:
-    with open("DID_ABI.json", "r", encoding="utf-8") as f:
+    with open(os.path.join(BASE_DIR, "DID_ABI.json"), "r", encoding="utf-8") as f:
         DID_CONTRACT_ABI = json.load(f)
 except FileNotFoundError:
     print("⚠️ DID_ABI.json 파일을 찾을 수 없습니다. 파일명과 위치를 확인해 주세요.")
@@ -65,7 +228,7 @@ if not ISSUER_KEY:
         raise RuntimeError("❌ 운영 환경에서는 ISSUER_PRIVATE_KEY가 반드시 .env에 고정되어야 합니다.")
     issuer_account = Account.create()
     ISSUER_KEY = issuer_account.key.hex()
-    print(f"⚠️ 개발 환경: 임시 Issuer 키 생성됨 → {ISSUER_KEY}")
+    print("⚠️ 개발 환경: 임시 Issuer 키 생성됨 (키 값은 로그에 기록하지 않습니다).")
 else:
     issuer_account = Account.from_key(ISSUER_KEY)
 
@@ -79,6 +242,8 @@ _issuer_priv_key  = keys.PrivateKey(_pk_bytes)
 ISSUER_PUBLIC_KEY_HEX = _issuer_priv_key.public_key.to_hex()
 
 SERVER_BASE_URL = os.getenv("SERVER_BASE_URL", "http://localhost:8001")
+# VC 본문에는 내부 서버 주소가 아닌 외부 상태 조회 주소를 넣는다.
+AUTH_PUBLIC_BASE_URL = (os.getenv("AUTH_PUBLIC_BASE_URL") or SERVER_BASE_URL).rstrip("/")
 
 # ──────────────────────────────────────────────
 # 2. 세션 및 보안 설정 상수
@@ -317,13 +482,17 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://loc
 
 app = FastAPI(title="PKNU DID Issuer Server")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if not AUTH_SERVICE_SETTINGS.internal_only:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+install_internal_auth_routes(app, get_db_connection)
+install_auth_guard(app, AUTH_SERVICE_SETTINGS)
 
 @app.on_event("startup")
 async def on_startup():
@@ -744,7 +913,7 @@ async def verify_email_auth(request: VerifyRequest, background_tasks: Background
             "issuer": ISSUER_DID,
             "issuanceDate": issued_str,
             "expirationDate": expires_str,
-            "credentialStatus": {"id": f"{SERVER_BASE_URL}/api/status/{request.wallet_address}", "type": "StatusList2021Entry"},
+            "credentialStatus": {"id": f"{AUTH_PUBLIC_BASE_URL}/api/status/{request.wallet_address}", "type": "StatusList2021Entry"},
             "credentialSubject": {"id": subject_did, "university": "부경대학교", "isStudent": True}
         }
 

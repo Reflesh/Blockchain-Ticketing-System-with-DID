@@ -3,8 +3,11 @@ import axios from 'axios'
 import './App.css'
 import { ethers } from 'ethers'
 
-const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001/api'
 const TICKET_API_URL = import.meta.env.VITE_TICKET_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ||
+  (import.meta.env.VITE_AUTH_VIA_BACKEND === 'true'
+    ? TICKET_API_URL
+    : import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001/api')
 
 function withPoster(ticket) {
   return {
@@ -735,9 +738,9 @@ function App() {
   const handleLogout = async () => {
     if (userToken) {
       try {
-        await axios.post(`${AUTH_API_URL}/logout`, { access_token: userToken })
+        await axios.post(`${AUTH_API_URL}/logout`, { access_token: userToken }, { timeout: 5000 })
       } catch (error) {
-        console.error('서버 로그인 세션 폐기에 실패했습니다.', error)
+        console.error('서버 로그인 세션 폐기에 실패했습니다. 기기에서 로그아웃합니다.')
       }
     }
     setCurrentUser(null)
