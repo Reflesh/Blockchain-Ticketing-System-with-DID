@@ -426,12 +426,17 @@ async def buy_tickets_api(request: TicketRequest, session_wallet=Depends(require
     booking_id = None
     locked_seat_ids = []
     total_amount = 0
+    paid_amount = 0
+    payment_confirmed = False
+    refund_attempted = False
     buyer_address = None
 
     def mark_booking_failed(reason, trigger_refund=False):
-        if trigger_refund and total_amount > 0 and request.payment_id:
+        nonlocal refund_attempted
+        if trigger_refund and payment_confirmed and paid_amount > 0 and request.payment_id and not refund_attempted:
+            refund_attempted = True
             print(f"🔄 블록체인 실패. 자동 환불 시도: {request.payment_id}")
-            cancel_portone_v2_payment(request.payment_id, f"발급 실패: {reason}", total_amount)
+            cancel_portone_v2_payment(request.payment_id, f"발급 실패: {reason}", paid_amount)
         if not booking_id: return
         try:
             with get_db_connection() as conn:
@@ -450,8 +455,14 @@ async def buy_tickets_api(request: TicketRequest, session_wallet=Depends(require
         if not request.payment_id:
             raise HTTPException(status_code=400, detail="결제 정보(payment_id)가 누락되었습니다.")
 
+        if not request.seat_ids:
+            raise HTTPException(status_code=400, detail="예매할 좌석을 한 석 이상 선택해야 합니다.")
+
         if len(request.seat_ids) > 4:
             raise HTTPException(status_code=400, detail="한 번에 최대 4석까지만 예매할 수 있습니다.")
+
+        if len(set(request.seat_ids)) != len(request.seat_ids):
+            raise HTTPException(status_code=400, detail="중복된 좌석이 포함되어 있습니다.")
 
         payload_str = json.dumps({
             "wallet_address": request.wallet_address,
@@ -471,25 +482,43 @@ async def buy_tickets_api(request: TicketRequest, session_wallet=Depends(require
         if payment_info.get("status") != "PAID":
             raise HTTPException(status_code=400, detail="결제가 완료되지 않았습니다.")
         paid_amount = int(payment_info.get("amount", {}).get("total", 0))
+        payment_confirmed = True
 
         # 3. DB 기록 및 상태 업데이트
         booking_no = f"BK-{uuid.uuid4().hex[:12].upper()}"
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id, seat_code, price_amount, status FROM seats WHERE id = ANY(%s) FOR UPDATE", (request.seat_ids,))
+                cursor.execute(
+                    "SELECT event_id, sale_status FROM event_sessions WHERE id = %s",
+                    (request.event_session_id,)
+                )
+                session_row = cursor.fetchone()
+                if not session_row:
+                    raise HTTPException(status_code=400, detail="선택한 공연 회차를 찾을 수 없습니다.")
+                if session_row["event_id"] != request.event_id:
+                    raise HTTPException(status_code=400, detail="선택한 회차가 해당 공연에 속하지 않습니다.")
+                if session_row["sale_status"] != "open":
+                    raise HTTPException(status_code=409, detail="현재 예매할 수 없는 공연 회차입니다.")
+
+                cursor.execute(
+                    "SELECT id, event_session_id, seat_code, price_amount, status FROM seats WHERE id = ANY(%s) FOR UPDATE",
+                    (request.seat_ids,)
+                )
                 seat_rows = cursor.fetchall()
 
                 if len(seat_rows) != len(request.seat_ids):
                     raise HTTPException(status_code=400, detail="일부 좌석 정보를 찾을 수 없습니다.")
+                invalid_session_seats = [s["seat_code"] for s in seat_rows if s["event_session_id"] != request.event_session_id]
+                if invalid_session_seats:
+                    raise HTTPException(status_code=400, detail=f"선택한 회차에 속하지 않는 좌석이 포함되어 있습니다: {', '.join(invalid_session_seats)}")
                 unavailable = [s["seat_code"] for s in seat_rows if s["status"] != "available"]
                 if unavailable:
-                    raise Exception(f"이미 선점된 좌석입니다: {', '.join(unavailable)}")
+                    raise HTTPException(status_code=409, detail=f"이미 선점된 좌석입니다: {', '.join(unavailable)}")
 
                 total_amount = sum(int(seat["price_amount"] or 0) for seat in seat_rows)
                 locked_seat_ids = list(request.seat_ids)
 
                 if paid_amount != total_amount:
-                    cancel_portone_v2_payment(request.payment_id, "금액 위변조 시도", paid_amount)
                     raise HTTPException(status_code=403, detail="결제 금액이 일치하지 않습니다.")
 
                 cursor.execute(
@@ -562,9 +591,12 @@ async def buy_tickets_api(request: TicketRequest, session_wallet=Depends(require
 
         return {"status": "success", "message": "티켓이 성공적으로 발급되었습니다.", "booking_no": booking_no, "transaction_hash": tx_hash_hex}
 
+    except HTTPException as e:
+        mark_booking_failed(str(e.detail), trigger_refund=payment_confirmed)
+        raise
     except Exception as e:
         error_msg = str(e)
-        mark_booking_failed(error_msg, trigger_refund=True)
+        mark_booking_failed(error_msg, trigger_refund=payment_confirmed)
         raise HTTPException(status_code=500, detail=f"예매 처리 중 문제가 발생하여 결제가 안전하게 환불 처리되었습니다: {error_msg}")
 
 # 🚨 변경 사항 적용됨: 서버 주도 동반인 양도 API

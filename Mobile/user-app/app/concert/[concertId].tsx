@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import { PosterImage } from '@/components/PosterImage';
 import { useWallet } from '@/context/WalletContext';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Modal,
   ScrollView,
@@ -15,49 +17,14 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { MOCK_CONCERTS } from '@/constants/concerts';
+import { TICKET_API_URL } from '@/constants/api';
+import { mapEventResponse, type Concert, type EventResponse } from '@/constants/concerts';
 
 const TABS = ['상세정보', '기대평', 'Q&A', '공연장정보', '예매유의사항'];
-
-// ─── 관계자(주최사/관리자) 지갑 주소 목록
-const OFFICIAL_ADDRESSES = new Set([
-  '0xAdminWallet0000000000000000000000000001',
-  '0xAdminWallet0000000000000000000000000002',
-]);
 
 type Post = { id: number; author: string; content: string; createdAt: string };
 type Reply = Post & { isOfficial: boolean };
 type QnaPost = Post & { replies: Reply[] };
-
-const SAMPLE_REVIEWS: Post[] = [
-  { id: 1, author: '0xAbCd1234AbCd1234AbCd1234AbCd12341234AbCd', content: '기대돼요! 작년 공연도 너무 좋았는데 올해는 더 기대됩니다 🎶', createdAt: '2026.08.12' },
-  { id: 2, author: '0x5E6F78905E6F78905E6F78905E6F78907890AbCd', content: '티켓팅 성공! 드디어 직관할 수 있다니 너무 설레요', createdAt: '2026.08.15' },
-];
-
-const SAMPLE_QNAS: QnaPost[] = [
-  {
-    id: 1,
-    author: '0x1234ABCD1234ABCD1234ABCD1234ABCD1234ABCD',
-    content: '주차는 어떻게 되나요? 현장 주차 가능한가요?',
-    createdAt: '2026.08.10',
-    replies: [
-      {
-        id: 101,
-        author: '0xAdminWallet0000000000000000000000000001',
-        content: '현장 유료 주차가 가능하며, 공연 당일은 혼잡이 예상되어 대중교통 이용을 권장드립니다.',
-        createdAt: '2026.08.11',
-        isOfficial: true,
-      },
-    ],
-  },
-  {
-    id: 2,
-    author: '0xFEDC56780FEDC56780FEDC56780FEDC56780FEDC',
-    content: '당일 취소 환불 규정이 어떻게 되나요?',
-    createdAt: '2026.08.18',
-    replies: [],
-  },
-];
 
 function shortAddr(addr: string) {
   if (!addr || addr.length <= 13) return addr;
@@ -325,13 +292,55 @@ const wm = StyleSheet.create({
 // ─── 메인 화면
 export default function ConcertDetailScreen() {
   const { concertId } = useLocalSearchParams<{ concertId: string }>();
-  const concert = MOCK_CONCERTS.find((c) => c.id === concertId);
   const { address } = useWallet();
+  const [concert, setConcert] = useState<Concert | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState(0);
-  const [reviews, setReviews] = useState<Post[]>(SAMPLE_REVIEWS);
-  const [qnas, setQnas] = useState<QnaPost[]>(SAMPLE_QNAS);
+  const [reviews, setReviews] = useState<Post[]>([]);
+  const [qnas, setQnas] = useState<QnaPost[]>([]);
   const [modalType, setModalType] = useState<'review' | 'qna' | 'reply' | null>(null);
   const [replyTargetId, setReplyTargetId] = useState<number | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadConcert = async () => {
+      setLoading(true);
+      setLoadError('');
+      try {
+        const response = await fetch(`${TICKET_API_URL}/events/${encodeURIComponent(concertId)}`, {
+          signal: controller.signal,
+        });
+        const body = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(body?.detail || '공연 정보를 불러오지 못했습니다.');
+        }
+        if (!body?.data) {
+          throw new Error('공연 상세 응답 형식이 올바르지 않습니다.');
+        }
+        setConcert(mapEventResponse(body.data as EventResponse));
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setConcert(null);
+        setLoadError(error instanceof Error ? error.message : '공연 정보를 불러오지 못했습니다.');
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+
+    void loadConcert();
+    return () => controller.abort();
+  }, [concertId]);
+
+  if (loading) {
+    return (
+      <View style={s.loadingState}>
+        <ActivityIndicator size="large" color="#E11D48" />
+        <Text style={s.loadingText}>공연 정보를 불러오는 중입니다.</Text>
+      </View>
+    );
+  }
 
   if (!concert) {
     return (
@@ -340,7 +349,7 @@ export default function ConcertDetailScreen() {
           <Ionicons name="chevron-back" size={20} color="#fff" />
           <Text style={{ color: '#fff', fontSize: 15 }}>돌아가기</Text>
         </TouchableOpacity>
-        <Text style={{ color: '#9CA3AF', padding: 20 }}>공연 정보를 찾을 수 없습니다.</Text>
+        <Text style={{ color: '#9CA3AF', padding: 20 }}>{loadError || '공연 정보를 찾을 수 없습니다.'}</Text>
       </SafeAreaView>
     );
   }
@@ -380,8 +389,7 @@ export default function ConcertDetailScreen() {
       const newQna: QnaPost = { id: Date.now(), author: address ?? '', content: text, createdAt: dateStr, replies: [] };
       setQnas((prev) => [newQna, ...prev]);
     } else if (modalType === 'reply' && replyTargetId !== null) {
-      const isOfficial = OFFICIAL_ADDRESSES.has(address ?? '');
-      const newReply: Reply = { id: Date.now(), author: address ?? '', content: text, createdAt: dateStr, isOfficial };
+      const newReply: Reply = { id: Date.now(), author: address ?? '', content: text, createdAt: dateStr, isOfficial: false };
       setQnas((prev) =>
         prev.map((q) =>
           q.id === replyTargetId ? { ...q, replies: [...q.replies, newReply] } : q
@@ -398,6 +406,11 @@ export default function ConcertDetailScreen() {
       <View style={[s.posterArea, { backgroundColor: concert.posterColor }]}>
         <View style={[s.posterGlow, { backgroundColor: accent + '30' }]} />
         <Text style={[s.posterBgLetter, { color: accent + '16' }]}>{concert.title[0]}</Text>
+        <PosterImage
+          uri={concert.image}
+          style={s.posterImage}
+          overlayColor="rgba(0,0,0,0.48)"
+        />
         <SafeAreaView edges={['top']}>
           <TouchableOpacity style={s.backBtn} onPress={() => router.back()} accessibilityLabel="돌아가기">
             <View style={s.backPill}>
@@ -411,7 +424,7 @@ export default function ConcertDetailScreen() {
             <Text style={[s.genreBadgeText, { color: accent }]}>{concert.genre}</Text>
           </View>
           <Text style={s.posterTitle}>{concert.title}</Text>
-          <Text style={s.posterArtist}>{concert.artist}</Text>
+          <Text style={s.posterTime}>{concert.displayTime}</Text>
         </View>
       </View>
 
@@ -431,8 +444,8 @@ export default function ConcertDetailScreen() {
         <View style={s.infoSep} />
         <View style={s.infoCard}>
           <Ionicons name="time-outline" size={15} color={accent} />
-          <Text style={s.infoLabel}>관람시간</Text>
-          <Text style={s.infoValue} numberOfLines={2}>{concert.runtime}</Text>
+          <Text style={s.infoLabel}>공연일시</Text>
+          <Text style={s.infoValue} numberOfLines={2}>{concert.displayTime}</Text>
         </View>
       </View>
 
@@ -452,14 +465,16 @@ export default function ConcertDetailScreen() {
         {/* 상세정보 */}
         {activeTab === 0 && (
           <View style={s.tabContent}>
-            <View style={s.card}>
-              <Text style={s.cardTitle}>공연 소개</Text>
-              <Text style={s.cardBody}>{concert.description}</Text>
-            </View>
+            {concert.description !== '' && (
+              <View style={s.card}>
+                <Text style={s.cardTitle}>공연 소개</Text>
+                <Text style={s.cardBody}>{concert.description}</Text>
+              </View>
+            )}
             <View style={s.card}>
               <Text style={s.cardTitle}>공연 정보</Text>
               <View style={s.row}><Text style={s.rowKey}>관람연령</Text><Text style={s.rowVal}>{concert.ageRating}</Text></View>
-              <View style={s.row}><Text style={s.rowKey}>공연시간</Text><Text style={s.rowVal}>{concert.runtime}</Text></View>
+              <View style={s.row}><Text style={s.rowKey}>공연일시</Text><Text style={s.rowVal}>{concert.displayTime}</Text></View>
               <View style={s.row}><Text style={s.rowKey}>티켓가격</Text><Text style={s.rowVal}>{concert.price}</Text></View>
             </View>
           </View>
@@ -552,7 +567,15 @@ export default function ConcertDetailScreen() {
         <TouchableOpacity
           style={[s.ctaBtn, { backgroundColor: accent, shadowColor: accent }]}
           activeOpacity={0.85}
-          onPress={() => Alert.alert('예매하기', '현재 예매 기능은 준비 중입니다.')}
+          onPress={() => router.push({
+            pathname: '/booking/[eventId]',
+            params: {
+              eventId: concert.id,
+              title: concert.title,
+              venue: concert.venue,
+              accentColor: concert.accentColor,
+            },
+          })}
         >
           <Ionicons name="ticket-outline" size={18} color="#fff" />
           <Text style={s.ctaBtnText}>예매하기</Text>
@@ -574,9 +597,12 @@ export default function ConcertDetailScreen() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0A0A14' },
   safe: { flex: 1, backgroundColor: '#0A0A14' },
+  loadingState: { flex: 1, backgroundColor: '#0A0A14', justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingText: { fontSize: 14, color: '#9CA3AF' },
   errorBack: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 4 },
   /* Poster */
   posterArea: { height: 280, justifyContent: 'flex-end', overflow: 'hidden' },
+  posterImage: { ...StyleSheet.absoluteFillObject },
   posterGlow: { position: 'absolute', top: -80, right: -80, width: 280, height: 280, borderRadius: 140 },
   posterBgLetter: { position: 'absolute', bottom: -30, right: -8, fontSize: 250, fontWeight: '900', lineHeight: 270 },
   backBtn: { margin: 14 },
@@ -589,7 +615,7 @@ const s = StyleSheet.create({
   genreBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1 },
   genreBadgeText: { fontSize: 11, fontWeight: '700' },
   posterTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', lineHeight: 32 },
-  posterArtist: { fontSize: 14, color: 'rgba(255,255,255,0.5)' },
+  posterTime: { fontSize: 14, color: 'rgba(255,255,255,0.5)' },
   /* Info row */
   infoRow: { flexDirection: 'row', backgroundColor: '#13131F', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   infoCard: { flex: 1, alignItems: 'center', padding: 14, gap: 4 },

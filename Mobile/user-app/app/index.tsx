@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import { PosterImage } from '@/components/PosterImage';
 import { useWallet } from '@/context/WalletContext';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Dimensions,
   FlatList,
@@ -16,7 +18,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CATEGORIES, MOCK_CONCERTS, type Concert } from '@/constants/concerts';
+import { TICKET_API_URL } from '@/constants/api';
+import { CATEGORIES, mapEventResponse, type Concert, type EventResponse } from '@/constants/concerts';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_W * 0.76;
@@ -40,12 +43,13 @@ function SmallCard({ item }: { item: Concert }) {
         <Text style={[s.smallBgLetter, { color: item.accentColor }]}>
           {item.title[0]}
         </Text>
+        <PosterImage uri={item.image} style={s.posterImage} />
         <View style={[s.smallGenreBadge, { backgroundColor: item.accentColor + '28' }]}>
           <Text style={[s.smallGenreText, { color: item.accentColor }]}>{item.genre}</Text>
         </View>
       </View>
       <Text style={s.smallTitle} numberOfLines={2}>{item.title}</Text>
-      <Text style={s.smallArtist} numberOfLines={1}>{item.artist}</Text>
+      <Text style={s.smallTime} numberOfLines={1}>{item.displayTime}</Text>
     </TouchableOpacity>
   );
 }
@@ -65,13 +69,14 @@ function ListCard({ item }: { item: Concert }) {
     >
       <View style={[s.listPoster, { backgroundColor: item.posterColor }]}>
         <Text style={[s.listBgLetter, { color: item.accentColor + '30' }]}>{item.title[0]}</Text>
+        <PosterImage uri={item.image} style={s.posterImage} />
         <View style={[s.listGenreBadge, { backgroundColor: item.accentColor + '28' }]}>
           <Text style={[s.listGenreText, { color: item.accentColor }]}>{item.genre}</Text>
         </View>
       </View>
       <View style={s.listInfo}>
         <Text style={s.listTitle} numberOfLines={2}>{item.title}</Text>
-        <Text style={s.listArtist} numberOfLines={1}>{item.artist}</Text>
+        <Text style={s.listTime} numberOfLines={1}>{item.displayTime}</Text>
         <View style={s.listMeta}>
           <Ionicons name="location-outline" size={11} color="#6B7280" />
           <Text style={s.listMetaText}>{item.venue}</Text>
@@ -89,6 +94,9 @@ function ListCard({ item }: { item: Concert }) {
 export default function HomeScreen() {
   const { address, logout } = useWallet();
   const shortAddr = address ? `${address.slice(0, 6)}···${address.slice(-4)}` : null;
+  const [concerts, setConcerts] = useState<Concert[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const drawerX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -107,13 +115,39 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const searchResults = searchQuery.trim().length > 0
-    ? MOCK_CONCERTS.filter(
+    ? concerts.filter(
         (c) =>
           c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          c.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          c.displayTime.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          c.venue.toLowerCase().includes(searchQuery.toLowerCase()) ||
           c.genre.includes(searchQuery)
       )
     : [];
+
+  const loadConcerts = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const response = await fetch(`${TICKET_API_URL}/events`);
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(body?.detail || '공연 목록을 불러오지 못했습니다.');
+      }
+      if (!Array.isArray(body?.data)) {
+        throw new Error('공연 목록 응답 형식이 올바르지 않습니다.');
+      }
+      setConcerts(body.data.map((event: EventResponse) => mapEventResponse(event)));
+    } catch (error) {
+      setConcerts([]);
+      setLoadError(error instanceof Error ? error.message : '공연 목록을 불러오지 못했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadConcerts();
+  }, [loadConcerts]);
 
   const openDrawer = useCallback(() => {
     setDrawerOpen(true);
@@ -148,24 +182,25 @@ export default function HomeScreen() {
   ).current;
 
   useEffect(() => {
+    if (concerts.length <= 1) return;
     const iv = setInterval(() => {
       if (isUserScrolling.current) return;
       setCarouselIndex((prev) => {
-        const next = (prev + 1) % MOCK_CONCERTS.length;
+        const next = (prev + 1) % concerts.length;
         try { carouselRef.current?.scrollToIndex({ index: next, animated: true }); } catch {}
         return next;
       });
     }, 3500);
     return () => clearInterval(iv);
-  }, []);
+  }, [concerts.length]);
 
   const filtered = activeCategory === '전체'
-    ? MOCK_CONCERTS
-    : MOCK_CONCERTS.filter((c) => c.genre === activeCategory);
+    ? concerts
+    : concerts.filter((c) => c.genre === activeCategory);
 
   const allModalData = allModalCategory === '전체'
-    ? MOCK_CONCERTS
-    : MOCK_CONCERTS.filter((c) => c.genre === allModalCategory);
+    ? concerts
+    : concerts.filter((c) => c.genre === allModalCategory);
 
   const openAllModal = (category: string) => {
     setAllModalCategory(category);
@@ -191,11 +226,34 @@ export default function HomeScreen() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false}>
+          {loading && (
+            <View style={s.loadState}>
+              <ActivityIndicator size="large" color="#E11D48" />
+              <Text style={s.loadStateText}>공연 목록을 불러오는 중입니다.</Text>
+            </View>
+          )}
+          {!loading && loadError !== '' && (
+            <View style={s.loadState}>
+              <Ionicons name="cloud-offline-outline" size={36} color="#6B7280" />
+              <Text style={s.loadErrorText}>{loadError}</Text>
+              <TouchableOpacity style={s.retryBtn} onPress={() => void loadConcerts()}>
+                <Text style={s.retryBtnText}>다시 시도</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          {!loading && loadError === '' && concerts.length === 0 && (
+            <View style={s.loadState}>
+              <Ionicons name="calendar-outline" size={36} color="#6B7280" />
+              <Text style={s.loadStateText}>등록된 공연이 없습니다.</Text>
+            </View>
+          )}
+          {!loading && loadError === '' && concerts.length > 0 && (
+            <>
           {/* ── Carousel ── */}
           <View style={{ marginTop: 14 }}>
             <FlatList
               ref={carouselRef}
-              data={MOCK_CONCERTS}
+              data={concerts}
               horizontal
               showsHorizontalScrollIndicator={false}
               snapToInterval={CARD_W + CARD_GAP}
@@ -208,7 +266,7 @@ export default function HomeScreen() {
               onMomentumScrollEnd={(e) => {
                 isUserScrolling.current = false;
                 const i = Math.round(e.nativeEvent.contentOffset.x / (CARD_W + CARD_GAP));
-                setCarouselIndex(Math.max(0, Math.min(i, MOCK_CONCERTS.length - 1)));
+                setCarouselIndex(Math.max(0, Math.min(i, concerts.length - 1)));
               }}
               renderItem={({ item }) => (
                 <TouchableOpacity
@@ -219,12 +277,17 @@ export default function HomeScreen() {
                   <View style={[s.carouselPoster, { backgroundColor: item.posterColor }]}>
                     <View style={[s.carouselGlow, { backgroundColor: item.accentColor + '22' }]} />
                     <Text style={[s.carouselBgLetter, { color: item.accentColor + '18' }]}>{item.title[0]}</Text>
+                    <PosterImage
+                      uri={item.image}
+                      style={s.posterImage}
+                      overlayColor="rgba(0,0,0,0.42)"
+                    />
                     <View style={s.carouselOverlay}>
                       <View style={[s.genreBadge, { backgroundColor: item.accentColor + '28', borderColor: item.accentColor + '55' }]}>
                         <Text style={[s.genreBadgeText, { color: item.accentColor }]}>{item.genre}</Text>
                       </View>
                       <Text style={s.carouselTitle} numberOfLines={2}>{item.title}</Text>
-                      <Text style={s.carouselArtist}>{item.artist}</Text>
+                      <Text style={s.carouselTime}>{item.displayTime}</Text>
                     </View>
                   </View>
                   <View style={s.carouselBottom}>
@@ -241,7 +304,7 @@ export default function HomeScreen() {
               )}
             />
             <View style={s.dots}>
-              {MOCK_CONCERTS.map((_, i) => (
+              {concerts.map((_, i) => (
                 <View key={i} style={[s.dot, i === carouselIndex && s.dotActive]} />
               ))}
             </View>
@@ -295,6 +358,8 @@ export default function HomeScreen() {
               <Text style={s.emptyCategoryText}>이 카테고리의 공연이 아직 없어요</Text>
             )}
           </View>
+            </>
+          )}
         </ScrollView>
       </SafeAreaView>
 
@@ -427,7 +492,7 @@ export default function HomeScreen() {
             ) : searchResults.length === 0 ? (
               <View style={s.searchEmpty}>
                 <Ionicons name="alert-circle-outline" size={48} color="#2A2A3E" />
-                <Text style={s.searchEmptyText}>'{searchQuery}'에 대한 결과가 없어요</Text>
+                <Text style={s.searchEmptyText}>“{searchQuery}”에 대한 결과가 없어요</Text>
               </View>
             ) : (
               <>
@@ -450,18 +515,24 @@ export default function HomeScreen() {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0A0A14' },
+  loadState: { alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 24, paddingVertical: 48 },
+  loadStateText: { fontSize: 14, color: '#9CA3AF', textAlign: 'center' },
+  loadErrorText: { fontSize: 14, color: '#FCA5A5', textAlign: 'center', lineHeight: 20 },
+  retryBtn: { marginTop: 4, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: '#E11D48' },
+  retryBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12 },
   iconBtn: { padding: 4 },
   brand: { fontSize: 20, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 },
   carouselCard: { borderRadius: 20, overflow: 'hidden', backgroundColor: '#13131F', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   carouselPoster: { height: 210, justifyContent: 'flex-end', overflow: 'hidden' },
+  posterImage: { ...StyleSheet.absoluteFillObject },
   carouselGlow: { position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: 100 },
   carouselBgLetter: { position: 'absolute', top: -24, right: -8, fontSize: 190, fontWeight: '900', lineHeight: 210 },
   carouselOverlay: { padding: 18, gap: 5 },
   genreBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, borderWidth: 1, marginBottom: 2 },
   genreBadgeText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.2 },
   carouselTitle: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', lineHeight: 28 },
-  carouselArtist: { fontSize: 13, color: 'rgba(255,255,255,0.5)' },
+  carouselTime: { fontSize: 13, color: 'rgba(255,255,255,0.5)' },
   carouselBottom: { backgroundColor: '#13131F', padding: 14, gap: 6 },
   carouselInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   carouselInfoText: { fontSize: 12, color: '#6B7280' },
@@ -485,7 +556,7 @@ const s = StyleSheet.create({
   smallGenreBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   smallGenreText: { fontSize: 10, fontWeight: '700' },
   smallTitle: { fontSize: 13, fontWeight: '600', color: '#FFFFFF', lineHeight: 18 },
-  smallArtist: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
+  smallTime: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
   listCard: { flexDirection: 'row', backgroundColor: '#13131F', borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   listPoster: { width: 90, height: 110, justifyContent: 'flex-end', padding: 8, overflow: 'hidden' },
   listBgLetter: { position: 'absolute', bottom: -8, right: 0, fontSize: 60, fontWeight: '900', lineHeight: 70 },
@@ -493,7 +564,7 @@ const s = StyleSheet.create({
   listGenreText: { fontSize: 9, fontWeight: '700' },
   listInfo: { flex: 1, padding: 12, justifyContent: 'center', gap: 4 },
   listTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF', lineHeight: 20 },
-  listArtist: { fontSize: 12, color: '#9CA3AF' },
+  listTime: { fontSize: 12, color: '#9CA3AF' },
   listMeta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   listMetaText: { fontSize: 11, color: '#6B7280' },
   drawer: { position: 'absolute', top: 0, left: 0, bottom: 0, width: DRAWER_WIDTH, backgroundColor: '#0F0F1E', borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.06)', shadowColor: '#000', shadowOffset: { width: 8, height: 0 }, shadowOpacity: 0.45, shadowRadius: 24, elevation: 24 },

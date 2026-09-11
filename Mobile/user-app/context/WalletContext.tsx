@@ -5,7 +5,7 @@ type WalletContextType = {
   address: string | null;
   wallet: ethers.Wallet | null;
   accessToken: string | null;
-  setSession: (wallet: ethers.Wallet | null, accessToken: string | null, mockAddress?: string) => void;
+  setSession: (wallet: ethers.Wallet | null, accessToken: string | null) => void;
   logout: () => void;
 };
 
@@ -16,9 +16,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
 
-  const setSession = (newWallet: ethers.Wallet | null, newToken: string | null, mockAddress?: string) => {
+  const setSession = (newWallet: ethers.Wallet | null, newToken: string | null) => {
     setWalletState(newWallet);
-    setAddress(newWallet ? newWallet.address : mockAddress ?? null);
+    setAddress(newWallet?.address ?? null);
     setAccessToken(newToken);
   };
 

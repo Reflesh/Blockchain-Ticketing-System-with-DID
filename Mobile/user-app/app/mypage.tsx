@@ -14,22 +14,6 @@ import { AUTH_API_URL, TICKET_API_URL } from '@/constants/api';
 type BookingItem = { booking_item_id: number; seat_code: string; token_id: number | null; ticket_status: string };
 type Booking = { id: number; booking_no: string; title: string; venue: string; display_time_text: string; poster_color: string; items: BookingItem[] };
 
-const MOCK_BOOKINGS: Booking[] = [
-  {
-    id: 1, booking_no: 'TP-2026-0001', title: '아이유 콘서트 : The Golden Hour',
-    venue: '상암 월드컵 경기장', display_time_text: '2026.09.15 (화) 19:00', poster_color: '#C4192F',
-    items: [{ booking_item_id: 1, seat_code: 'R구역 3열 12번', token_id: 42, ticket_status: 'minted' }],
-  },
-  {
-    id: 2, booking_no: 'TP-2026-0002', title: '싸이 흠뻑쇼 SUMMER SWAG 2026',
-    venue: '부경대학교 대운동장', display_time_text: '2026.08.20 (목) 18:00', poster_color: '#5B21B6',
-    items: [
-      { booking_item_id: 2, seat_code: 'A구역 1열 5번', token_id: 43, ticket_status: 'minted' },
-      { booking_item_id: 3, seat_code: 'A구역 1열 6번', token_id: null, ticket_status: 'pending' },
-    ],
-  },
-];
-
 function shortAddr(addr: string | null) {
   if (!addr) return '';
   return `${addr.slice(0, 6)}···${addr.slice(-4)}`;
@@ -91,14 +75,22 @@ export default function MyPageScreen() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const loadBookings = useCallback(async () => {
-    if (!address) return;
-    if (!accessToken) { setBookings(MOCK_BOOKINGS); setLoading(false); setRefreshing(false); return; }
+    setLoadError('');
+    if (!address || !accessToken) {
+      setBookings([]);
+      setLoadError('로그인 정보가 없습니다. 다시 로그인해주세요.');
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     try {
       const res = await fetch(`${TICKET_API_URL}/users/${address}/bookings`, { headers: { Authorization: `Bearer ${accessToken}` } });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.detail || '예매 내역을 불러오지 못했습니다.');
+      if (!Array.isArray(data?.data)) throw new Error('예매 내역 응답 형식이 올바르지 않습니다.');
       setBookings((data.data ?? []).map((b: any) => ({
         ...b,
         title: b.title ?? b.name,
@@ -106,8 +98,9 @@ export default function MyPageScreen() {
         display_time_text: b.display_time_text ?? b.time,
         poster_color: b.poster_color ?? '#E11D48',
       })));
-    } catch {
-      setBookings(MOCK_BOOKINGS);
+    } catch (error) {
+      setBookings([]);
+      setLoadError(error instanceof Error ? error.message : '예매 내역을 불러오지 못했습니다.');
     } finally {
       setLoading(false); setRefreshing(false);
     }
@@ -180,9 +173,18 @@ export default function MyPageScreen() {
         ListHeaderComponent={<Text style={s.sectionLabel}>내 티켓</Text>}
         ListEmptyComponent={
           <View style={s.empty}>
-            <View style={s.emptyIcon}><Ionicons name="ticket-outline" size={38} color="#2D2D40" /></View>
-            <Text style={s.emptyTitle}>예매한 티켓이 없어요</Text>
-            <Text style={s.emptySub}>웹사이트에서 티켓을 예매하면{'\n'}여기에 표시됩니다</Text>
+            <View style={s.emptyIcon}>
+              <Ionicons name={loadError ? 'cloud-offline-outline' : 'ticket-outline'} size={38} color="#2D2D40" />
+            </View>
+            <Text style={s.emptyTitle}>{loadError ? '예매 내역을 불러오지 못했습니다' : '예매한 티켓이 없어요'}</Text>
+            <Text style={s.emptySub}>
+              {loadError || <>웹사이트에서 티켓을 예매하면{'\n'}여기에 표시됩니다</>}
+            </Text>
+            {loadError !== '' && (
+              <TouchableOpacity style={s.retryBtn} onPress={() => void loadBookings()}>
+                <Text style={s.retryBtnText}>다시 시도</Text>
+              </TouchableOpacity>
+            )}
           </View>
         }
         renderItem={({ item }) => <TicketCard booking={item} onSeatPress={handleSeatPress} />}
@@ -212,6 +214,8 @@ const s = StyleSheet.create({
   emptyIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: 'rgba(255,255,255,0.04)', justifyContent: 'center', alignItems: 'center', marginBottom: 4 },
   emptyTitle: { fontSize: 17, fontWeight: '600', color: '#FFFFFF' },
   emptySub: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', lineHeight: 20 },
+  retryBtn: { marginTop: 4, paddingHorizontal: 16, paddingVertical: 9, borderRadius: 10, backgroundColor: '#E11D48' },
+  retryBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 });
 
 const tc = StyleSheet.create({

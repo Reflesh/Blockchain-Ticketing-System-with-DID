@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
   Alert, Animated, KeyboardAvoidingView, Platform,
@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AUTH_API_URL } from '@/constants/api';
 
 export default function LoginScreen() {
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const { setSession } = useWallet();
   const [keystoreJson, setKeystoreJson] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -71,7 +72,7 @@ export default function LoginScreen() {
       setSession(wallet, access_token);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('로그인 성공', '로그인되었습니다.', [
-        { text: '확인', onPress: () => router.replace('/') },
+        { text: '확인', onPress: () => router.replace(returnTo === '/booking-confirm' ? '/booking-confirm' : '/') },
       ]);
     } catch (e: any) {
       shake();
@@ -79,14 +80,6 @@ export default function LoginScreen() {
     } finally {
       setIsUnlocking(false);
     }
-  };
-
-  // ⚠️ 개발용 — 배포 전 제거할 것
-  const devLogin = () => {
-    setSession(null, null, '0x1234567890123456789012345678901234567890');
-    Alert.alert('로그인 성공', '로그인되었습니다.', [
-      { text: '확인', onPress: () => router.replace('/') },
-    ]);
   };
 
   const step1Done = !!keystoreJson;
@@ -171,11 +164,6 @@ export default function LoginScreen() {
             <Ionicons name="shield-checkmark-outline" size={13} color="#2D2D40" />
             <Text style={s.secText}>개인키는 기기 밖으로 전송되지 않습니다</Text>
           </View>
-
-          {/* ⚠️ 개발용 — 배포 전 제거할 것 */}
-          <TouchableOpacity onPress={devLogin} style={s.devBtn}>
-            <Text style={s.devText}>개발용 빠른 입장</Text>
-          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -232,6 +220,4 @@ const s = StyleSheet.create({
   loginBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   secRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 20 },
   secText: { fontSize: 12, color: '#2D2D40' },
-  devBtn: { marginTop: 18, alignItems: 'center' },
-  devText: { color: '#1A1A2A', fontSize: 13 },
 });
