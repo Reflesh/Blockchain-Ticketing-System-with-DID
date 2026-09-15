@@ -18,6 +18,7 @@ import QRCode from 'react-native-qrcode-svg';
 import Svg, { Circle } from 'react-native-svg';
 
 const REFRESH_INTERVAL = 20;
+const restoreSystemBrightness = Brightness.useSystemBrightnessAsync;
 
 // ─── 카운트다운 링 ────────────────────────────────────
 function CountdownRing({
@@ -86,6 +87,7 @@ export default function QRScreen() {
 
   const { wallet, address } = useWallet();
   const [qrValue, setQrValue] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(REFRESH_INTERVAL);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -99,7 +101,7 @@ export default function QRScreen() {
     return () => {
       if (Platform.OS === 'android') {
         // Android: 시스템 자동밝기 제어권 반환
-        Brightness.restoreSystemBrightnessAsync().catch(() => {});
+        restoreSystemBrightness().catch(() => {});
       } else {
         // iOS: 저장해둔 원래 밝기로 복원
         originalPromise
@@ -130,11 +132,18 @@ export default function QRScreen() {
   const generateQR = useCallback(async () => {
     if (!wallet || !address) {
       setQrValue(null);
+      setQrError('로그인된 모바일 Wallet이 필요합니다.');
+      return;
+    }
+    const parsedTokenId = Number(tokenId);
+    if (!Number.isSafeInteger(parsedTokenId) || parsedTokenId <= 0) {
+      setQrValue(null);
+      setQrError('티켓 토큰 정보가 올바르지 않습니다.');
       return;
     }
     const payload = {
       action: 'ticket_checkin',
-      token_id: Number(tokenId),
+      token_id: parsedTokenId,
       wallet_address: address,
       timestamp: Math.floor(Date.now() / 1000),
     };
@@ -142,6 +151,7 @@ export default function QRScreen() {
     const signature = await wallet.signMessage(message);
 
     setQrValue(JSON.stringify({ payload, signature }));
+    setQrError(null);
     setSecondsLeft(REFRESH_INTERVAL);
     pulse();
   }, [wallet, address, tokenId, pulse]);
@@ -204,16 +214,18 @@ export default function QRScreen() {
             />
           ) : (
             <View style={s.qrPlaceholder}>
-              <Text style={s.qrPlaceholderText}>QR 생성 중...</Text>
+              <Text style={s.qrPlaceholderText}>{qrError ?? 'QR 생성 중...'}</Text>
             </View>
           )}
         </Animated.View>
 
         {/* 카운트다운 */}
-        <View style={s.countdown}>
-          <CountdownRing seconds={secondsLeft} total={REFRESH_INTERVAL} />
-          <Text style={s.countdownLabel}>초 후 자동 갱신</Text>
-        </View>
+        {qrValue && (
+          <View style={s.countdown}>
+            <CountdownRing seconds={secondsLeft} total={REFRESH_INTERVAL} />
+            <Text style={s.countdownLabel}>초 후 자동 갱신</Text>
+          </View>
+        )}
       </View>
 
       {/* 보안 배지 */}

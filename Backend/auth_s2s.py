@@ -60,6 +60,14 @@ class AuthReply:
     retry_after: str = ""
 
 
+@dataclass(frozen=True)
+class AuthBytesReply:
+    status: int
+    body: bytes
+    content_type: str
+    retry_after: str = ""
+
+
 class AuthGateway:
     def __init__(self, base_url="", key="", timeout=5.0, opener=None):
         self.base_url = base_url.rstrip("/")
@@ -116,6 +124,56 @@ class AuthGateway:
         except AuthServiceUnavailable:
             raise
         except (URLError, socket.timeout, TimeoutError, OSError, ValueError, UnicodeError):
+            raise AuthServiceUnavailable("인증 서비스를 일시적으로 이용할 수 없습니다.") from None
+
+    def call_bytes(self, method, path, body=None, content_type="", authorization=""):
+        """OID4VCI JSON/form/PNG 응답을 Main을 통해 그대로 중계한다."""
+        allowed = path.startswith(("/api/", "/oid4vci/", "/.well-known/"))
+        if not self.base_url or not allowed or "://" in path or ".." in path:
+            raise AuthServiceUnavailable("허용되지 않은 인증 중계 경로입니다.")
+        if body is not None and len(body) > MAX_RESPONSE_BYTES:
+            raise AuthServiceUnavailable("인증 요청을 처리할 수 없습니다.")
+
+        headers = {
+            "X-Service-Key": self.key,
+            "Accept": "application/json, image/png",
+        }
+        if content_type:
+            headers["Content-Type"] = content_type
+        if authorization:
+            headers["Authorization"] = authorization
+        req = Request(self.base_url + path, data=body, method=method, headers=headers)
+        try:
+            try:
+                response = self.opener.open(req, timeout=self.timeout)
+            except HTTPError as error:
+                response = error
+            with response:
+                status = response.code
+                content = response.read(MAX_RESPONSE_BYTES + 1)
+                response_type = response.headers.get("Content-Type", "application/octet-stream")
+                retry_after = response.headers.get("Retry-After", "")
+            if len(content) > MAX_RESPONSE_BYTES:
+                raise AuthServiceUnavailable("인증 서버 응답을 처리할 수 없습니다.")
+            if status >= 500 or 300 <= status < 400:
+                raise AuthServiceUnavailable("인증 서비스를 일시적으로 이용할 수 없습니다.")
+            if response_type.split(";", 1)[0].strip().lower() == "application/json":
+                parsed = json.loads(content)
+                detail = parsed.get("detail") if isinstance(parsed, dict) else None
+                if isinstance(detail, dict) and detail.get("code") in {
+                    "AUTH_SERVICE_UNAUTHORIZED", "AUTH_SERVICE_NOT_CONFIGURED"
+                }:
+                    raise AuthServiceUnavailable("인증 서비스를 일시적으로 이용할 수 없습니다.")
+            return AuthBytesReply(
+                status,
+                content,
+                response_type,
+                retry_after if retry_after.isdigit() else "",
+            )
+        except AuthServiceUnavailable:
+            raise
+        except (HTTPError, URLError, socket.timeout, TimeoutError, OSError,
+                ValueError, UnicodeError, json.JSONDecodeError):
             raise AuthServiceUnavailable("인증 서비스를 일시적으로 이용할 수 없습니다.") from None
 
     def session_wallet(self, token):

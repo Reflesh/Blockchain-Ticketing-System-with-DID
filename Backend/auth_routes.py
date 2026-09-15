@@ -1,8 +1,9 @@
 import asyncio
+import re
 import time
 from urllib.parse import quote
-from fastapi import Body, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import Body, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 try:
     from .auth_s2s import ADDRESS, AuthServiceUnavailable, inspect_credential, inspect_session
 except ImportError:
@@ -92,6 +93,24 @@ def install_gateway_routes(app, gateway):
             return await relay("GET", path)
         return endpoint
 
+    async def relay_bytes(method, path, body=None, content_type="", authorization=""):
+        try:
+            result = await asyncio.to_thread(
+                gateway.call_bytes, method, path, body, content_type, authorization
+            )
+        except AuthServiceUnavailable:
+            raise HTTPException(status_code=503,
+                                detail="인증 서비스를 일시적으로 이용할 수 없습니다. 잠시 후 다시 시도해주세요.") from None
+        headers = {"Cache-Control": "no-store", "Content-Type": result.content_type}
+        if result.retry_after:
+            headers["Retry-After"] = result.retry_after
+        return Response(content=result.body, status_code=result.status, headers=headers)
+
+    def get_bytes_handler(path):
+        async def endpoint():
+            return await relay_bytes("GET", path)
+        return endpoint
+
     for name in ("request-email-auth", "verify-email-auth", "login-challenge",
                  "login-verify", "logout", "revoke-vc", "verify-vp"):
         path = "/api/" + name
@@ -113,3 +132,104 @@ def install_gateway_routes(app, gateway):
         if not ADDRESS.fullmatch(wallet_address):
             raise HTTPException(status_code=400, detail="지갑 주소 형식을 확인하세요.")
         return await relay("GET", "/api/status/" + quote(wallet_address, safe=""))
+
+    @app.post("/api/oid4vci/credential-offers")
+    async def oid4vci_create_offer(payload: dict = Body(...)):
+        return await relay("POST", "/api/oid4vci/credential-offers", payload)
+
+    for metadata_name in ("openid-credential-issuer", "oauth-authorization-server", "jwks.json"):
+        path = "/.well-known/" + metadata_name
+        app.add_api_route(
+            path,
+            get_bytes_handler(path),
+            methods=["GET"],
+            name="oid4vci_" + metadata_name.replace("-", "_").replace(".", "_"),
+        )
+
+    offer_id_pattern = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+    @app.get("/oid4vci/credential-offer/{offer_id}")
+    async def oid4vci_offer(offer_id: str):
+        if not offer_id_pattern.fullmatch(offer_id):
+            raise HTTPException(status_code=400, detail="Credential Offer ID 형식을 확인하세요.")
+        return await relay_bytes("GET", "/oid4vci/credential-offer/" + quote(offer_id, safe=""))
+
+    @app.get("/oid4vci/credential-offer/{offer_id}/qr")
+    async def oid4vci_offer_qr(offer_id: str):
+        if not offer_id_pattern.fullmatch(offer_id):
+            raise HTTPException(status_code=400, detail="Credential Offer ID 형식을 확인하세요.")
+        return await relay_bytes("GET", "/oid4vci/credential-offer/" + quote(offer_id, safe="") + "/qr")
+
+    @app.post("/oid4vci/token")
+    async def oid4vci_token(request: Request):
+        return await relay_bytes(
+            "POST",
+            "/oid4vci/token",
+            await request.body(),
+            request.headers.get("content-type", ""),
+        )
+
+    @app.post("/oid4vci/nonce")
+    async def oid4vci_nonce():
+        return await relay_bytes("POST", "/oid4vci/nonce", b"")
+
+    @app.post("/oid4vci/credential")
+    async def oid4vci_credential(request: Request):
+        return await relay_bytes(
+            "POST",
+            "/oid4vci/credential",
+            await request.body(),
+            request.headers.get("content-type", ""),
+            request.headers.get("authorization", ""),
+        )
+
+    pairing_id_pattern = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+    @app.post("/api/mobile-pairings")
+    async def mobile_pairing_create(request: Request):
+        return await relay_bytes(
+            "POST",
+            "/api/mobile-pairings",
+            await request.body(),
+            request.headers.get("content-type", "application/json"),
+            request.headers.get("authorization", ""),
+        )
+
+    @app.get("/api/mobile-pairings/{pairing_id}")
+    async def mobile_pairing_status(pairing_id: str, request: Request):
+        if not pairing_id_pattern.fullmatch(pairing_id):
+            raise HTTPException(status_code=400, detail="모바일 연결 ID 형식을 확인하세요.")
+        return await relay_bytes(
+            "GET",
+            "/api/mobile-pairings/" + quote(pairing_id, safe=""),
+            authorization=request.headers.get("authorization", ""),
+        )
+
+    @app.get("/api/mobile-devices")
+    async def mobile_devices(request: Request):
+        return await relay_bytes(
+            "GET",
+            "/api/mobile-devices",
+            authorization=request.headers.get("authorization", ""),
+        )
+
+    @app.post("/api/mobile-devices/{wallet_address}/revoke")
+    async def mobile_device_revoke(wallet_address: str, request: Request):
+        if not ADDRESS.fullmatch(wallet_address):
+            raise HTTPException(status_code=400, detail="모바일 Wallet 주소 형식을 확인하세요.")
+        return await relay_bytes(
+            "POST",
+            "/api/mobile-devices/" + quote(wallet_address, safe="") + "/revoke",
+            await request.body(),
+            request.headers.get("content-type", "application/json"),
+            request.headers.get("authorization", ""),
+        )
+
+    @app.post("/api/mobile-pairings/complete")
+    async def mobile_pairing_complete(request: Request):
+        return await relay_bytes(
+            "POST",
+            "/api/mobile-pairings/complete",
+            await request.body(),
+            request.headers.get("content-type", "application/json"),
+        )

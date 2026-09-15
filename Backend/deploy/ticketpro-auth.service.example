@@ -1,0 +1,22 @@
+[Unit]
+Description=TicketPro DID and OpenID4VCI Auth Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/ticketpro-auth
+EnvironmentFile=/home/admin/ticketpro-auth/.env
+# 기존 .env는 수정하지 않고, 선택적인 .env.auth.runtime을 run_server.py가 덮어쓴다.
+ExecStart=/home/admin/ticketpro-auth/.venv/bin/python /home/admin/ticketpro-auth/run_server.py auth
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

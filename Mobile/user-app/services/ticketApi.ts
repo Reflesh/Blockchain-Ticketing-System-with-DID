@@ -47,4 +47,3 @@ export function getEventSessions(eventId: string, signal?: AbortSignal) {
 export function getSessionSeats(sessionId: string, signal?: AbortSignal) {
   return getData<Seat[]>(`/sessions/${encodeURIComponent(sessionId)}/seats`, signal);
 }
-

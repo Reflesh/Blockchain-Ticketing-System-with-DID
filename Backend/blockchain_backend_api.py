@@ -562,7 +562,7 @@ async def buy_tickets_api(request: TicketRequest, session_wallet=Depends(require
         signed_txn = web3.eth.account.sign_transaction(txn, private_key=PRIVATE_KEY)
         tx_hash = web3.eth.send_raw_transaction(signed_txn.raw_transaction)
         tx_hash_hex = web3.to_hex(tx_hash)
-        
+
         tx_receipt = web3.eth.wait_for_transaction_receipt(tx_hash)
         if tx_receipt.status != 1:
             raise Exception("블록체인 스마트 컨트랙트 실행 중 Revert 되었습니다.")
@@ -644,10 +644,10 @@ async def transfer_ticket_api(request: TransferRequest, session_wallet=Depends(r
                     comp_row = resolve_user(cursor, request.companion_username)
                 except HTTPException as he:
                     raise HTTPException(status_code=404, detail=f"양도할 대상 '{request.companion_username}' 을(를) 찾을 수 없습니다. 가입된 닉네임을 정확히 입력해주세요.") from he
-                
+
                 if not comp_row or not comp_row.get("wallet_address"):
                     raise HTTPException(status_code=404, detail="양도할 대상의 지갑 정보를 찾을 수 없습니다.")
-                
+
                 recipient = web3.to_checksum_address(comp_row["wallet_address"])
                 if recipient.lower() == request.wallet_address.lower():
                     raise HTTPException(status_code=400, detail="본인에게는 양도할 수 없습니다.")

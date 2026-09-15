@@ -413,6 +413,14 @@ export default function HomeScreen() {
             <Text style={s.drawerMenuText}>마이페이지</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={s.drawerMenuItem}
+            onPress={() => { closeDrawer(); setTimeout(() => router.push('/credential-wallet' as any), 280); }}
+          >
+            <Ionicons name="id-card-outline" size={18} color="#6B7280" />
+            <Text style={s.drawerMenuText}>학생 인증서 Wallet</Text>
+          </TouchableOpacity>
+
           <View style={s.drawerSep} />
 
           <Text style={s.drawerCatLabel}>카테고리</Text>

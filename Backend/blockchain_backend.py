@@ -37,7 +37,7 @@ if not os.path.exists(ENV_PATH):
 
 load_dotenv(ENV_PATH)
 
-# 기존 세션/VC SQL 검증을 기본값으로 유지하고 배포 설정으로 내부 API에 전환
+# 기존 세션/VC SQL 검증을 기본값으로 유지하고 배포 설정으로 내부 API에 전환한다.
 AUTH_VALIDATION_MODE = os.getenv("AUTH_VALIDATION_MODE", "db").strip().lower()
 if AUTH_VALIDATION_MODE not in {"db", "internal"}:
     raise RuntimeError("AUTH_VALIDATION_MODE는 db 또는 internal이어야 합니다.")
@@ -319,14 +319,24 @@ def require_user_session(authorization: Optional[str] = Header(default=None)):
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT s.wallet_address, v.expires_at AS vc_expires_at
+                SELECT COALESCE(s.subject_wallet_address, s.wallet_address) AS wallet_address,
+                       principal.expires_at AS vc_expires_at,
+                       mobile.expires_at AS mobile_expires_at
                 FROM user_login_sessions s
-                JOIN issued_vcs v ON LOWER(v.wallet_address) = LOWER(s.wallet_address)
-                LEFT JOIN revoked_vcs r ON LOWER(r.wallet_address) = LOWER(s.wallet_address)
+                LEFT JOIN issued_vcs direct
+                  ON LOWER(direct.wallet_address) = LOWER(s.wallet_address)
+                LEFT JOIN mobile_credentials mobile
+                  ON LOWER(mobile.wallet_address) = LOWER(s.wallet_address)
+                JOIN issued_vcs principal
+                  ON LOWER(principal.wallet_address) = LOWER(COALESCE(s.subject_wallet_address, s.wallet_address))
+                LEFT JOIN revoked_vcs r
+                  ON LOWER(r.wallet_address) = LOWER(principal.wallet_address)
                 WHERE s.token_hash = %s
                   AND s.expires_at > %s
                   AND s.revoked_at IS NULL
                   AND r.wallet_address IS NULL
+                  AND (direct.wallet_address IS NOT NULL OR
+                       (mobile.wallet_address IS NOT NULL AND mobile.revoked_at IS NULL))
                 """,
                 (hash_user_session_token(token), time.time())
             )
@@ -340,6 +350,13 @@ def require_user_session(authorization: Optional[str] = Header(default=None)):
         raise HTTPException(status_code=401, detail="DID 인증서 만료 정보를 확인할 수 없습니다.")
     if datetime.now(timezone.utc) > vc_expires_at:
         raise HTTPException(status_code=401, detail="DID 인증서가 만료되었습니다.")
+    if session.get("mobile_expires_at"):
+        try:
+            mobile_expires_at = datetime.fromisoformat(session["mobile_expires_at"].replace("Z", "+00:00"))
+        except (AttributeError, ValueError):
+            raise HTTPException(status_code=401, detail="모바일 인증서 만료 정보를 확인할 수 없습니다.")
+        if datetime.now(timezone.utc) > mobile_expires_at:
+            raise HTTPException(status_code=401, detail="모바일 인증서가 만료되었습니다.")
     return session["wallet_address"]
 
 def require_matching_wallet(session_wallet, requested_wallet):

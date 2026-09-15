@@ -1,8 +1,27 @@
-# Welcome to your Expo app 👋
+# TicketPro 사용자 앱
+
+## 서버 주소 설정
+
+앱은 기본적으로 현재 AWS 시연 서버를 사용한다. 다른 서버나 로컬 환경에서
+실행할 때는 `.env.example`을 `.env`로 복사한 뒤 주소를 변경한다. 이 방식은
+Linux·macOS·Windows에서 동일하게 적용된다.
+
+```bash
+cp .env.example .env
+```
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`EXPO_PUBLIC_AUTH_API_URL`은 Auth 서버의 직접 주소가 아니라 Auth API를 중계하는
+Main 서버의 `/api` 주소를 사용한다.
+
+## 실행
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
-
-## Get started
 
 1. Install dependencies
 

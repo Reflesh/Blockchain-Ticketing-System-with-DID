@@ -1,4 +1,8 @@
-# Welcome to your Expo app 👋
+# TicketPro 관리자 앱
+
+다른 Main 서버를 사용할 때는 `.env.example`을 `.env`로 복사하고
+`EXPO_PUBLIC_TICKET_API_URL`을 변경한다. Windows PowerShell에서는
+`Copy-Item .env.example .env`를 사용할 수 있다.
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 

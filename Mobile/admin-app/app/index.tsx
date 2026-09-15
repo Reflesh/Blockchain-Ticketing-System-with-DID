@@ -14,7 +14,7 @@ export default function SplashScreen() {
 
     const timer = setTimeout(() => router.replace('/main'), 2200);
     return () => clearTimeout(timer);
-  }, []);
+  }, [fadeAnim, scaleAnim]);
 
   return (
     <TouchableWithoutFeedback

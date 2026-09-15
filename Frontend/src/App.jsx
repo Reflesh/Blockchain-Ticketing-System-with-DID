@@ -38,6 +38,15 @@ function formatPrice(amount) {
   return numericAmount === 0 ? '무료' : `${numericAmount.toLocaleString()}원`
 }
 
+async function copyForDemo(value, label) {
+  try {
+    await navigator.clipboard.writeText(value)
+    alert(`${label}을(를) 복사했습니다.`)
+  } catch {
+    window.prompt(`${label}을(를) 직접 복사하세요.`, value)
+  }
+}
+
 // 🎟️ 양도 가능 여부: 발행 완료 + 미양도 + 본인 소유인 티켓만 양도 가능
 function isTransferable(item, currentUserWallet) {
   return (
@@ -47,12 +56,6 @@ function isTransferable(item, currentUserWallet) {
     item?.token_id !== null &&
     item?.token_id !== undefined
   )
-}
-
-// 지갑 주소 축약 표시 (0x1234...abcd)
-function shortenAddress(addr) {
-  if (!addr || addr.length < 12) return addr || ''
-  return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
 function createEmptyAdminEvent() {
@@ -105,7 +108,7 @@ function App() {
   const [sessions, setSessions] = useState([])
   const [selectedSession, setSelectedSession] = useState(null)
   const [seats, setSeats] = useState([])
-  const [selectedSeat, setSelectedSeat] = useState(null)
+  const [, setSelectedSeat] = useState(null)
   const [selectedSeats, setSelectedSeats] = useState([])
   const MAX_SEATS_PER_BOOKING = 4
   const [bookedTickets, setBookedTickets] = useState([])
@@ -148,6 +151,13 @@ function App() {
   const [walletPassword, setWalletPassword] = useState('')
   const [tempWallet, setTempWallet] = useState(null)
   const [isRecoveryMode, setIsRecoveryMode] = useState(false)
+  const [didIssuanceMode, setDidIssuanceMode] = useState('legacy')
+  const [oid4vciOffer, setOid4vciOffer] = useState(null)
+  const [mobilePairing, setMobilePairing] = useState(null)
+  const [mobilePairingStatus, setMobilePairingStatus] = useState('idle')
+  const [mobilePairingSeconds, setMobilePairingSeconds] = useState(0)
+  const [mobileDevices, setMobileDevices] = useState([])
+  const [isPairingCreating, setIsPairingCreating] = useState(false)
 
   // 🎟️ 티켓 양도 관련 상태 (닉네임 입력 추가)
   const [transferModalBooking, setTransferModalBooking] = useState(null)
@@ -189,6 +199,48 @@ function App() {
     if (!currentUser?.walletAddress) return
     loadUserData(currentUser.walletAddress)
   }, [currentUser])
+
+  useEffect(() => {
+    if (!userToken || currentPage !== 'mypage') return
+    loadMobileDevices()
+  }, [userToken, currentPage])
+
+  useEffect(() => {
+    if (!mobilePairing?.pairing_id || mobilePairingStatus !== 'pending' || !userToken) return
+    const poll = async () => {
+      try {
+        const response = await axios.get(
+          `${AUTH_API_URL}/mobile-pairings/${encodeURIComponent(mobilePairing.pairing_id)}`,
+          { headers: getUserHeaders() },
+        )
+        if (response.data?.status === 'completed') {
+          setMobilePairingStatus('completed')
+          setMobilePairingSeconds(0)
+          await loadMobileDevices()
+        } else if (response.data?.status === 'expired') {
+          setMobilePairingStatus('expired')
+          setMobilePairingSeconds(0)
+        } else if (Number.isFinite(response.data?.expires_in)) {
+          setMobilePairingSeconds(response.data.expires_in)
+        }
+      } catch (error) {
+        if (error.response?.status === 401) {
+          setMobilePairingStatus('error')
+        }
+      }
+    }
+    poll()
+    const intervalId = window.setInterval(poll, 2000)
+    return () => window.clearInterval(intervalId)
+  }, [mobilePairing?.pairing_id, mobilePairingStatus, userToken])
+
+  useEffect(() => {
+    if (mobilePairingStatus !== 'pending') return
+    const timerId = window.setInterval(() => {
+      setMobilePairingSeconds((seconds) => Math.max(0, seconds - 1))
+    }, 1000)
+    return () => window.clearInterval(timerId)
+  }, [mobilePairingStatus])
 
   useEffect(() => {
     if (window.location.pathname === '/Roblocks_admin') {
@@ -292,6 +344,66 @@ function App() {
   const getUserHeaders = (token) => ({
     Authorization: `Bearer ${token || userToken}`,
   })
+
+  const loadMobileDevices = async () => {
+    if (!userToken) return
+    try {
+      const response = await axios.get(`${AUTH_API_URL}/mobile-devices`, {
+        headers: getUserHeaders(),
+      })
+      setMobileDevices(Array.isArray(response.data?.data) ? response.data.data : [])
+    } catch (error) {
+      console.error('모바일 기기 목록을 불러오지 못했습니다.', error)
+    }
+  }
+
+  const handleCreateMobilePairing = async () => {
+    if (!userToken) {
+      alert('PC 웹에서 먼저 로그인해주세요.')
+      return
+    }
+    setIsPairingCreating(true)
+    try {
+      const response = await axios.post(
+        `${AUTH_API_URL}/mobile-pairings`,
+        {},
+        { headers: getUserHeaders() },
+      )
+      setMobilePairing(response.data)
+      setMobilePairingStatus('pending')
+      setMobilePairingSeconds(Number(response.data?.expires_in) || 120)
+    } catch (error) {
+      setMobilePairingStatus('error')
+      alert(error.response?.data?.detail || '모바일 연결 QR을 생성하지 못했습니다.')
+    } finally {
+      setIsPairingCreating(false)
+    }
+  }
+
+  const handleCopyPairingUri = async () => {
+    if (!mobilePairing?.pairing_uri) return
+    try {
+      await navigator.clipboard.writeText(mobilePairing.pairing_uri)
+      alert('모바일 연결 URI를 복사했습니다. 에뮬레이터 앱의 URI 입력창에 붙여넣으세요.')
+    } catch {
+      alert('클립보드 복사를 사용할 수 없습니다. URI를 직접 선택해 복사해주세요.')
+    }
+  }
+
+  const handleRevokeMobileDevice = async (device) => {
+    if (device.revoked_at) return
+    if (!window.confirm(`${device.device_name || '모바일 기기'} 연결을 해제할까요? 해당 기기의 로그인 세션이 종료됩니다.`)) return
+    try {
+      await axios.post(
+        `${AUTH_API_URL}/mobile-devices/${encodeURIComponent(device.wallet_address)}/revoke`,
+        { reason: 'revoked_by_user' },
+        { headers: getUserHeaders() },
+      )
+      await loadMobileDevices()
+    } catch (error) {
+      alert(error.response?.data?.detail || '모바일 기기 연결을 해제하지 못했습니다.')
+    }
+  }
 
   const loadAdminSessions = async (eventId) => {
     try {
@@ -591,11 +703,14 @@ function App() {
     }
     try {
       setIsEmailSending(true)
-      await axios.post(`${AUTH_API_URL}/request-email-auth`, { 
+      const response = await axios.post(`${AUTH_API_URL}/request-email-auth`, {
         email: cleanEmail,
         is_recovery: isRecoveryMode
       })
-      alert('인증번호가 발송되었습니다. 메일함을 확인하고 아래 인증번호를 입력하세요.')
+      const devCode = response.data.dev_verification_code
+      alert(devCode
+        ? `로컬 개발용 인증번호: ${devCode}`
+        : '인증번호가 발송되었습니다. 메일함을 확인하고 아래 인증번호를 입력하세요.')
       setDidStep(2)
     } catch (error) {
       alert('인증 오류: ' + (error.response?.data?.detail || error.message))
@@ -611,6 +726,16 @@ function App() {
     }
     try {
       setIsCodeVerifying(true)
+      if (didIssuanceMode === 'oid4vci') {
+        const offerRes = await axios.post(`${AUTH_API_URL}/oid4vci/credential-offers`, {
+          email: authEmail.trim().toLowerCase(),
+          code: authCode,
+        })
+        setOid4vciOffer(offerRes.data)
+        setDidStep(4)
+        return
+      }
+
       const wallet = ethers.Wallet.createRandom()
       const verifyRes = await axios.post(`${AUTH_API_URL}/verify-email-auth`, {
         email: authEmail.trim().toLowerCase(),
@@ -729,7 +854,7 @@ function App() {
         }
       }
       reader.readAsText(keystoreFile)
-    } catch (error) {
+    } catch {
       alert('로그인 오류 발생.')
       setIsKeystoreDecrypting(false)
     }
@@ -739,7 +864,7 @@ function App() {
     if (userToken) {
       try {
         await axios.post(`${AUTH_API_URL}/logout`, { access_token: userToken }, { timeout: 5000 })
-      } catch (error) {
+      } catch {
         console.error('서버 로그인 세션 폐기에 실패했습니다. 기기에서 로그아웃합니다.')
       }
     }
@@ -750,6 +875,10 @@ function App() {
     setKeystorePassword('')
     setBookedTickets([])
     setWishTickets([])
+    setMobilePairing(null)
+    setMobilePairingStatus('idle')
+    setMobilePairingSeconds(0)
+    setMobileDevices([])
     alert('로그아웃 되었습니다.')
     setCurrentPage('main')
   }
@@ -964,7 +1093,7 @@ function App() {
       })
       await loadUserData(currentUser.walletAddress)
       alert('찜 목록에서 삭제되었습니다.')
-    } catch (error) {
+    } catch {
       alert('찜 목록에서 삭제하지 못했습니다.')
     }
   }
@@ -1108,9 +1237,14 @@ function App() {
               <div className="signup-prompt-box">
                 <p>아직 안전한 DID가 없으신가요?</p>
                 {didStep === 0 && (
-                  <button onClick={() => setDidStep(1)} className="did-signup-btn">
-                    🎓 부경대 이메일 인증 후 DID 발급받기
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button onClick={() => { setDidIssuanceMode('oid4vci'); setDidStep(1); }} className="did-signup-btn">
+                      📱 OpenID4VCI 호환 Wallet으로 학생 인증서 받기
+                    </button>
+                    <button onClick={() => { setDidIssuanceMode('legacy'); setDidStep(1); }} className="did-signup-btn" style={{ background: '#555' }}>
+                      🎓 기존 DID 키 파일 발급받기
+                    </button>
+                  </div>
                 )}
                 {didStep === 1 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px' }}>
@@ -1149,6 +1283,53 @@ function App() {
                     <input type="password" placeholder="키 파일 암호 설정 (분실 시 복구 불가)" value={walletPassword} onChange={(e) => setWalletPassword(e.target.value)} className="password-input" />
                     <button onClick={handleCreateWallet} disabled={isWalletCreating} className="submit-login-btn">
                       {isWalletCreating ? '암호화 및 블록체인 등록 중...' : 'DID 키 파일 생성 및 다운로드'}
+                    </button>
+                  </div>
+                )}
+                {didStep === 4 && oid4vciOffer && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', marginTop: '15px' }}>
+                    <p style={{ fontSize: '13px', color: '#52c41a', margin: 0, fontWeight: 'bold' }}>
+                      이메일 인증 완료 — OpenID4VCI 호환 Wallet으로 QR을 스캔하세요.
+                    </p>
+                    <img
+                      src={oid4vciOffer.qr_png_url}
+                      alt="OpenID4VCI Credential Offer QR"
+                      style={{ width: '240px', height: '240px', background: '#fff', padding: '8px', borderRadius: '12px' }}
+                    />
+                    <button
+                      type="button"
+                      className="submit-login-btn"
+                      onClick={() => copyForDemo(oid4vciOffer.offer_uri, 'Credential Offer URI')}
+                      style={{ width: '100%' }}
+                    >
+                      Emulator용 Offer URI 복사
+                    </button>
+                    {oid4vciOffer.dev_tx_code && (
+                      <div style={{ width: '100%', padding: '12px', borderRadius: '8px', background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                        <div style={{ color: '#666', fontSize: '11px' }}>개발용 6자리 tx_code</div>
+                        <div style={{ color: '#237804', fontSize: '26px', fontWeight: 'bold', letterSpacing: '6px', marginTop: '4px' }}>
+                          {oid4vciOffer.dev_tx_code}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyForDemo(oid4vciOffer.dev_tx_code, 'tx_code')}
+                          style={{ marginTop: '8px', border: '1px solid #b7eb8f', borderRadius: '6px', background: '#fff', color: '#237804', padding: '6px 10px', cursor: 'pointer' }}
+                        >
+                          tx_code 복사
+                        </button>
+                      </div>
+                    )}
+                    <p style={{ color: '#888', fontSize: '11px', lineHeight: 1.5, margin: 0 }}>
+                      QR은 {oid4vciOffer.expires_in}초 동안 유효합니다. Wallet에서 QR을 스캔한 뒤 위 코드를 입력하세요.
+                      TicketPro 앱 연결은 웹 DID 로그인 후 마이페이지의 ‘모바일 연결 QR’을 사용합니다.
+                    </p>
+                    <button onClick={() => {
+                      setDidStep(0)
+                      setAuthCode('')
+                      setOid4vciOffer(null)
+                      setIsRecoveryMode(false)
+                    }} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '12px' }}>
+                      닫기
                     </button>
                   </div>
                 )}
@@ -1662,6 +1843,78 @@ function App() {
             <button className="icon-back-btn" onClick={handleGoBack}>⬅</button>
             <div className="mypage-container">
               <h2 className="mypage-title">마이페이지 👤</h2>
+              <section className="mobile-pairing-panel">
+                <div className="mobile-pairing-heading">
+                  <div>
+                    <h3>📱 모바일 앱 연결</h3>
+                    <p>PC에서 로그인한 계정을 앱의 새 Wallet과 연결합니다. PC 키 파일은 전송되지 않습니다.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="mobile-pairing-create-btn"
+                    onClick={handleCreateMobilePairing}
+                    disabled={isPairingCreating}
+                  >
+                    {isPairingCreating ? 'QR 생성 중…' : mobilePairingStatus === 'pending' ? '새 QR 발급' : '모바일 연결 QR 발급'}
+                  </button>
+                </div>
+
+                {mobilePairing && mobilePairingStatus !== 'idle' && (
+                  <div className={`mobile-pairing-content ${mobilePairingStatus}`}>
+                    {mobilePairingStatus === 'pending' && (
+                      <>
+                        <img
+                          className="mobile-pairing-qr"
+                          src={`data:image/png;base64,${mobilePairing.qr_png_base64}`}
+                          alt="TicketPro 모바일 연결 QR"
+                        />
+                        <div className="mobile-pairing-instructions">
+                          <strong>앱 → 학생 인증서 Wallet → 모바일 연결 QR 스캔</strong>
+                          <p>이 QR은 1회만 사용할 수 있고 <b>{mobilePairingSeconds}초</b> 후 만료됩니다.</p>
+                          <p>Android 에뮬레이터에서는 아래 URI를 복사해 앱에 직접 입력하세요.</p>
+                          <div className="mobile-pairing-uri-row">
+                            <input value={mobilePairing.pairing_uri || ''} readOnly aria-label="모바일 연결 URI" />
+                            <button type="button" onClick={handleCopyPairingUri}>복사</button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    {mobilePairingStatus === 'completed' && (
+                      <div className="mobile-pairing-result success">✅ 모바일 VC 발급과 앱 로그인이 완료됐습니다.</div>
+                    )}
+                    {mobilePairingStatus === 'expired' && (
+                      <div className="mobile-pairing-result">⏱️ QR이 만료됐습니다. 새 QR을 발급해주세요.</div>
+                    )}
+                    {mobilePairingStatus === 'error' && (
+                      <div className="mobile-pairing-result error">연결 상태를 확인하지 못했습니다. 다시 발급해주세요.</div>
+                    )}
+                  </div>
+                )}
+
+                <div className="mobile-device-list">
+                  <h4>연결된 모바일 기기</h4>
+                  {mobileDevices.length === 0 ? (
+                    <p className="mobile-device-empty">아직 연결된 기기가 없습니다.</p>
+                  ) : (
+                    mobileDevices.map((device) => (
+                      <div className={`mobile-device-row ${device.revoked_at ? 'revoked' : ''}`} key={device.wallet_address}>
+                        <div>
+                          <strong>{device.device_name || '모바일 Wallet'}</strong>
+                          <code>{device.wallet_address}</code>
+                          <span>
+                            {device.revoked_at
+                              ? '연결 해제됨'
+                              : `${new Date(device.issued_at).toLocaleDateString('ko-KR')} 연결`}
+                          </span>
+                        </div>
+                        {!device.revoked_at && (
+                          <button type="button" onClick={() => handleRevokeMobileDevice(device)}>연결 해제</button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
               <div className="mypage-tabs">
                 <button className={`tab-btn ${myPageTab === 'history' ? 'active' : ''}`} onClick={() => setMyPageTab('history')}>예매 내역</button>
                 <button className={`tab-btn ${myPageTab === 'wish' ? 'active' : ''}`} onClick={() => setMyPageTab('wish')}>찜 목록</button>
@@ -1793,41 +2046,41 @@ function App() {
               <section className="appguide-section">
                 <h3 className="appguide-section-title">모바일 앱 로그인 방법</h3>
                 <p className="appguide-notice-text">
-                  TicketPro는 개인 정보 보호를 위해 <strong>JSON 키 파일 기반 DID 로그인</strong>을 사용합니다.<br/>
-                  모바일에서 로그인하려면 아래 절차를 따라주세요.
+                  PC의 키 파일을 휴대폰으로 옮기지 않고, <strong>1회용 QR로 모바일용 VC</strong>를 발급합니다.<br/>
+                  최초 연결 후에는 앱에 암호화해 저장된 Wallet으로 독립적으로 로그인할 수 있습니다.
                 </p>
                 <div className="appguide-steps">
                   <div className="appguide-step">
                     <div className="appguide-step-num">1</div>
                     <div className="appguide-step-content">
-                      <h4>PC에서 DID 키 파일 발급</h4>
-                      <p>TicketPro 웹사이트에서 <strong>로그인 / DID 발급</strong>을 클릭 후, 부경대 이메일 인증을 통해 키 파일을 발급·다운로드하세요.</p>
+                      <h4>PC 웹에서 DID 로그인</h4>
+                      <p>TicketPro 웹사이트에 기존 DID/VC로 로그인한 뒤 <strong>마이페이지</strong>로 이동하세요.</p>
                     </div>
                   </div>
                   <div className="appguide-step">
                     <div className="appguide-step-num">2</div>
                     <div className="appguide-step-content">
-                      <h4>JSON 파일을 휴대폰으로 전송</h4>
-                      <p>다운로드된 <code>TicketPro_DID_학번.json</code> 파일을 카카오톡, 이메일, USB 등을 통해 휴대폰으로 옮겨주세요.</p>
+                      <h4>모바일 연결 QR 발급</h4>
+                      <p>마이페이지의 <strong>모바일 연결 QR 발급</strong>을 누르세요. QR은 1회용이며 약 2분 뒤 만료됩니다.</p>
                     </div>
                   </div>
                   <div className="appguide-step">
                     <div className="appguide-step-num">3</div>
                     <div className="appguide-step-content">
-                      <h4>TicketPro 앱 실행 후 파일 선택</h4>
-                      <p>앱을 실행하고 로그인 화면에서 <strong>키 파일 불러오기</strong>를 탭하여 전송받은 JSON 파일을 선택하세요.</p>
+                      <h4>앱에서 Wallet 생성 후 QR 스캔</h4>
+                      <p>앱의 <strong>학생 인증서 Wallet</strong>에서 로컬 Wallet을 만들고 QR을 스캔하세요. 에뮬레이터는 웹의 URI 복사 버튼으로 대신할 수 있습니다.</p>
                     </div>
                   </div>
                   <div className="appguide-step">
                     <div className="appguide-step-num">4</div>
                     <div className="appguide-step-content">
-                      <h4>비밀번호 입력 후 로그인</h4>
-                      <p>키 파일 생성 시 설정한 <strong>비밀번호</strong>를 입력하면 로그인이 완료됩니다. 비밀번호는 분실 시 복구가 불가하니 안전하게 보관하세요.</p>
+                      <h4>모바일 VC 발급 및 로그인</h4>
+                      <p>연결을 승인하면 앱 Wallet에 모바일용 VC가 저장되고 로그인됩니다. 다음부터는 Wallet 비밀번호만으로 로그인하세요.</p>
                     </div>
                   </div>
                 </div>
                 <div className="appguide-tip">
-                  💡 <strong>Tip:</strong> 키 파일은 절대 타인에게 공유하지 마세요. 키 파일과 비밀번호가 있으면 누구든 본인 계정으로 로그인이 가능합니다.
+                  💡 <strong>Tip:</strong> QR이 완료되기 전에는 타인이 스캔하지 않도록 관리하세요. 분실한 기기는 웹 마이페이지에서 즉시 연결 해제할 수 있습니다.
                 </div>
               </section>
 

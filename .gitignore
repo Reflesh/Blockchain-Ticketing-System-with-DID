@@ -26,8 +26,12 @@ dist-ssr
 
 # backend option
 .env
-*.db                
-*.sqlite3           
-__pycache__/        
-*.py[cod]           
+.env.*
+!.env.example
+!.env.*.example
+*.db
+*.sqlite3
+__pycache__/
+*.py[cod]
 .venv/
+Claude outputs/

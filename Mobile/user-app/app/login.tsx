@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AUTH_API_URL } from '@/constants/api';
+import { authenticateWallet } from '@/lib/auth';
 
 export default function LoginScreen() {
   const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
@@ -53,23 +53,8 @@ export default function LoginScreen() {
     setIsUnlocking(true);
     try {
       const wallet = (await ethers.Wallet.fromEncryptedJson(keystoreJson, password)) as ethers.Wallet;
-      const challengeRes = await fetch(`${AUTH_API_URL}/login-challenge`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet_address: wallet.address }),
-      });
-      if (!challengeRes.ok) throw new Error('로그인 요청에 실패했습니다.');
-      const { nonce, message } = await challengeRes.json();
-      const signature = await wallet.signMessage(message);
-      const verifyRes = await fetch(`${AUTH_API_URL}/login-verify`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet_address: wallet.address, nonce, message, signature }),
-      });
-      if (!verifyRes.ok) {
-        const err = await verifyRes.json().catch(() => null);
-        throw new Error(err?.detail ?? '로그인 검증에 실패했습니다.');
-      }
-      const { access_token } = await verifyRes.json();
-      setSession(wallet, access_token);
+      const session = await authenticateWallet(wallet);
+      setSession(wallet, session.accessToken, session.accountWalletAddress);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('로그인 성공', '로그인되었습니다.', [
         { text: '확인', onPress: () => router.replace(returnTo === '/booking-confirm' ? '/booking-confirm' : '/') },
@@ -164,6 +149,24 @@ export default function LoginScreen() {
             <Ionicons name="shield-checkmark-outline" size={13} color="#2D2D40" />
             <Text style={s.secText}>개인키는 기기 밖으로 전송되지 않습니다</Text>
           </View>
+
+          <View style={s.mobileWalletCard}>
+            <View style={s.mobileWalletTextBox}>
+              <Text style={s.mobileWalletTitle}>키스토어 파일이 없나요?</Text>
+              <Text style={s.mobileWalletSub}>
+                앱에서 Wallet을 만들고 PC 웹 마이페이지의 1회용 QR로 모바일 VC를 받으세요.
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => router.push('/credential-wallet')}
+              style={s.mobileWalletBtn}
+              activeOpacity={0.85}
+              accessibilityLabel="앱에서 모바일 Wallet 만들기"
+            >
+              <Ionicons name="qr-code-outline" size={18} color="#FFFFFF" />
+              <Text style={s.mobileWalletBtnText}>앱에서 Wallet 만들기</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -220,4 +223,26 @@ const s = StyleSheet.create({
   loginBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   secRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 20 },
   secText: { fontSize: 12, color: '#2D2D40' },
+  mobileWalletCard: {
+    marginTop: 24,
+    padding: 18,
+    borderRadius: 18,
+    backgroundColor: '#13131F',
+    borderWidth: 1,
+    borderColor: 'rgba(225,29,72,0.25)',
+    gap: 14,
+  },
+  mobileWalletTextBox: { gap: 5 },
+  mobileWalletTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  mobileWalletSub: { color: '#9CA3AF', fontSize: 12, lineHeight: 18 },
+  mobileWalletBtn: {
+    minHeight: 50,
+    borderRadius: 14,
+    backgroundColor: '#E11D48',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  mobileWalletBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });

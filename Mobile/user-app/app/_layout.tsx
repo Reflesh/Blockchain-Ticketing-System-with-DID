@@ -15,6 +15,7 @@ export default function RootLayout() {
             <Stack.Screen name="index" />
             <Stack.Screen name="login" />
             <Stack.Screen name="mypage" />
+            <Stack.Screen name="credential-wallet" />
             <Stack.Screen name="qr/[tokenId]" />
           </Stack>
           <StatusBar style="light" />
