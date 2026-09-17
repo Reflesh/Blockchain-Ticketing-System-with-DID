@@ -812,6 +812,7 @@ function App() {
           }
 
           let accessToken = ''
+          let accountWalletAddress = wallet.address
           try {
             const challengeRes = await axios.post(`${AUTH_API_URL}/login-challenge`, {
               wallet_address: wallet.address,
@@ -825,6 +826,7 @@ function App() {
               signature: loginSignature,
             })
             accessToken = verifyRes.data.access_token
+            accountWalletAddress = verifyRes.data.account_wallet_address || wallet.address
           } catch (authErr) {
             alert(
               'DID 로그인 세션 발급에 실패했습니다.\n' +
@@ -844,8 +846,20 @@ function App() {
           setUserToken(loginRes.data.access_token)
           setCurrentWallet(wallet)
           setUserToken(accessToken)
-          setCurrentUser({ username: extractedName, walletAddress: wallet.address, isDID: true })
-          await loadUserData(wallet.address, accessToken)
+          setCurrentUser({ username: extractedName, walletAddress: accountWalletAddress, isDID: true })
+          try {
+            const profileRes = await axios.get(
+              `${TICKET_API_URL}/users/${accountWalletAddress}/profile`,
+              { headers: getUserHeaders(accessToken) },
+            )
+            const displayName = profileRes.data?.data?.display_name
+            if (displayName && displayName !== 'TicketPro 회원') {
+              setCurrentUser({ username: displayName, walletAddress: accountWalletAddress, isDID: true })
+            }
+          } catch (profileError) {
+            console.error('사용자 프로필을 불러오지 못해 기존 표시 이름을 사용합니다.', profileError)
+          }
+          await loadUserData(accountWalletAddress, accessToken)
           setCurrentPage('main')
         } catch (err) {
           alert(err.response?.data?.detail || '비밀번호가 틀렸거나 유효하지 않은 키 파일입니다.')

@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { PosterImage } from '@/components/PosterImage';
 import { useWallet } from '@/context/WalletContext';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,8 +17,8 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { TICKET_API_URL } from '@/constants/api';
-import { mapEventResponse, type Concert, type EventResponse } from '@/constants/concerts';
+import { mapEventResponse, type Concert } from '@/constants/concerts';
+import { addWishlist, getEvent, getWishlist, removeWishlist } from '@/services/ticketApi';
 
 const TABS = ['상세정보', '기대평', 'Q&A', '공연장정보', '예매유의사항'];
 
@@ -292,10 +292,12 @@ const wm = StyleSheet.create({
 // ─── 메인 화면
 export default function ConcertDetailScreen() {
   const { concertId } = useLocalSearchParams<{ concertId: string }>();
-  const { address } = useWallet();
+  const { address, accessToken } = useWallet();
   const [concert, setConcert] = useState<Concert | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [isWished, setIsWished] = useState(false);
+  const [wishBusy, setWishBusy] = useState(false);
   const [activeTab, setActiveTab] = useState(0);
   const [reviews, setReviews] = useState<Post[]>([]);
   const [qnas, setQnas] = useState<QnaPost[]>([]);
@@ -309,17 +311,8 @@ export default function ConcertDetailScreen() {
       setLoading(true);
       setLoadError('');
       try {
-        const response = await fetch(`${TICKET_API_URL}/events/${encodeURIComponent(concertId)}`, {
-          signal: controller.signal,
-        });
-        const body = await response.json().catch(() => null);
-        if (!response.ok) {
-          throw new Error(body?.detail || '공연 정보를 불러오지 못했습니다.');
-        }
-        if (!body?.data) {
-          throw new Error('공연 상세 응답 형식이 올바르지 않습니다.');
-        }
-        setConcert(mapEventResponse(body.data as EventResponse));
+        const event = await getEvent(concertId, controller.signal);
+        setConcert(mapEventResponse(event));
       } catch (error) {
         if (controller.signal.aborted) return;
         setConcert(null);
@@ -332,6 +325,43 @@ export default function ConcertDetailScreen() {
     void loadConcert();
     return () => controller.abort();
   }, [concertId]);
+
+  const refreshWishlist = useCallback(async (signal?: AbortSignal) => {
+    if (!address || !accessToken) {
+      setIsWished(false);
+      return;
+    }
+    const wishlist = await getWishlist(address, accessToken, signal);
+    setIsWished(wishlist.some((item) => String(item.id) === String(concertId)));
+  }, [accessToken, address, concertId]);
+
+  useFocusEffect(useCallback(() => {
+    const controller = new AbortController();
+    void refreshWishlist(controller.signal).catch(() => {
+      if (!controller.signal.aborted) setIsWished(false);
+    });
+    return () => controller.abort();
+  }, [refreshWishlist]));
+
+  const handleWishlist = async () => {
+    if (!address || !accessToken) {
+      Alert.alert('로그인 필요', '로그인 후 찜할 수 있습니다.', [
+        { text: '취소', style: 'cancel' },
+        { text: '로그인', onPress: () => router.push('/login') },
+      ]);
+      return;
+    }
+    setWishBusy(true);
+    try {
+      if (isWished) await removeWishlist(address, concertId, accessToken);
+      else await addWishlist(address, concertId, accessToken);
+      await refreshWishlist();
+    } catch (error) {
+      Alert.alert('찜 처리 오류', error instanceof Error ? error.message : '찜 정보를 변경하지 못했습니다.');
+    } finally {
+      setWishBusy(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -564,6 +594,17 @@ export default function ConcertDetailScreen() {
 
       {/* ── 예매하기 CTA ── */}
       <SafeAreaView edges={['bottom']} style={s.ctaWrap}>
+        <View style={s.ctaRow}>
+        <TouchableOpacity
+          style={[s.wishBtn, isWished && { borderColor: accent, backgroundColor: accent + '18' }]}
+          activeOpacity={0.8}
+          disabled={wishBusy}
+          onPress={() => void handleWishlist()}
+          accessibilityLabel={isWished ? '찜 취소' : '찜하기'}
+        >
+          <Ionicons name={isWished ? 'heart' : 'heart-outline'} size={21} color={isWished ? accent : '#9CA3AF'} />
+          <Text style={[s.wishBtnText, isWished && { color: accent }]}>{isWished ? '찜됨' : '찜'}</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[s.ctaBtn, { backgroundColor: accent, shadowColor: accent }]}
           activeOpacity={0.85}
@@ -580,6 +621,7 @@ export default function ConcertDetailScreen() {
           <Ionicons name="ticket-outline" size={18} color="#fff" />
           <Text style={s.ctaBtnText}>예매하기</Text>
         </TouchableOpacity>
+        </View>
       </SafeAreaView>
 
       {/* ── 글쓰기 모달 ── */}
@@ -651,6 +693,9 @@ const s = StyleSheet.create({
   emptySub: { fontSize: 13, color: '#1F1F30' },
   /* CTA */
   ctaWrap: { backgroundColor: '#0A0A14', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 20, paddingTop: 12 },
-  ctaBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 16, paddingVertical: 17, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 16, elevation: 10 },
+  ctaRow: { flexDirection: 'row', gap: 10 },
+  wishBtn: { width: 70, alignItems: 'center', justifyContent: 'center', gap: 2, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: '#13131F' },
+  wishBtnText: { color: '#9CA3AF', fontSize: 11, fontWeight: '700' },
+  ctaBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 16, paddingVertical: 17, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 16, elevation: 10 },
   ctaBtnText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
 });

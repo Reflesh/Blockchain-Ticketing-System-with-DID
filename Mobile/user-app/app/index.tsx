@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { PosterImage } from '@/components/PosterImage';
 import { useWallet } from '@/context/WalletContext';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,8 +18,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { TICKET_API_URL } from '@/constants/api';
-import { CATEGORIES, mapEventResponse, type Concert, type EventResponse } from '@/constants/concerts';
+import { CATEGORIES, mapEventResponse, type Concert } from '@/constants/concerts';
+import { getEvents, getUserProfile } from '@/services/ticketApi';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_W * 0.76;
@@ -92,8 +92,9 @@ function ListCard({ item }: { item: Concert }) {
 
 // ─── Home screen ─────────────────────────────────────────
 export default function HomeScreen() {
-  const { address, logout } = useWallet();
+  const { address, accessToken, displayName: walletDisplayName, logout } = useWallet();
   const shortAddr = address ? `${address.slice(0, 6)}···${address.slice(-4)}` : null;
+  const [displayName, setDisplayName] = useState(walletDisplayName);
   const [concerts, setConcerts] = useState<Concert[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -128,15 +129,8 @@ export default function HomeScreen() {
     setLoading(true);
     setLoadError('');
     try {
-      const response = await fetch(`${TICKET_API_URL}/events`);
-      const body = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(body?.detail || '공연 목록을 불러오지 못했습니다.');
-      }
-      if (!Array.isArray(body?.data)) {
-        throw new Error('공연 목록 응답 형식이 올바르지 않습니다.');
-      }
-      setConcerts(body.data.map((event: EventResponse) => mapEventResponse(event)));
+      const events = await getEvents();
+      setConcerts(events.map(mapEventResponse));
     } catch (error) {
       setConcerts([]);
       setLoadError(error instanceof Error ? error.message : '공연 목록을 불러오지 못했습니다.');
@@ -145,9 +139,23 @@ export default function HomeScreen() {
     }
   }, []);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     void loadConcerts();
-  }, [loadConcerts]);
+  }, [loadConcerts]));
+
+  useFocusEffect(useCallback(() => {
+    if (!address || !accessToken) {
+      setDisplayName(walletDisplayName);
+      return;
+    }
+    void getUserProfile(address, accessToken)
+      .then((profile) => setDisplayName(
+        profile.display_name && profile.display_name !== 'TicketPro 회원'
+          ? profile.display_name
+          : walletDisplayName,
+      ))
+      .catch(() => setDisplayName(walletDisplayName));
+  }, [accessToken, address, walletDisplayName]));
 
   const openDrawer = useCallback(() => {
     setDrawerOpen(true);
@@ -383,7 +391,7 @@ export default function HomeScreen() {
                 <Ionicons name="wallet-outline" size={20} color="#E11D48" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.drawerLoginTitle}>TicketPro 회원</Text>
+                <Text style={s.drawerLoginTitle}>{displayName}</Text>
                 <Text style={[s.drawerLoginSub, { color: '#6B7280' }]}>{shortAddr}</Text>
               </View>
               <TouchableOpacity onPress={() => { logout(); closeDrawer(); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>

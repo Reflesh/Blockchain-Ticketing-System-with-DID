@@ -1,12 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useWallet } from '@/context/WalletContext';
+import { createSignedTicketQr } from '@/lib/ticketQr';
 import * as Brightness from 'expo-brightness';
 import { useKeepAwake } from 'expo-keep-awake';
 import { router, useLocalSearchParams } from 'expo-router';
 import { usePreventScreenCapture } from 'expo-screen-capture';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
+  AppState,
   Platform,
   StyleSheet,
   Text,
@@ -18,6 +21,7 @@ import QRCode from 'react-native-qrcode-svg';
 import Svg, { Circle } from 'react-native-svg';
 
 const REFRESH_INTERVAL = 20;
+const EXPIRY_SAFETY_MS = 1000;
 const restoreSystemBrightness = Brightness.useSystemBrightnessAsync;
 
 // ─── 카운트다운 링 ────────────────────────────────────
@@ -85,10 +89,14 @@ export default function QRScreen() {
       posterColor?: string;
     }>();
 
-  const { wallet, address } = useWallet();
+  const { wallet, address, accessToken } = useWallet();
   const [qrValue, setQrValue] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(REFRESH_INTERVAL);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const [validUntilMs, setValidUntilMs] = useState<number | null>(null);
+  const [isForeground, setIsForeground] = useState(AppState.currentState === 'active');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [loading, setLoading] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useKeepAwake();
@@ -111,6 +119,22 @@ export default function QRScreen() {
     };
   }, []);
 
+  // Background에서는 QR과 nonce를 화면에 남기지 않고 갱신 요청도 중단합니다.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const active = nextState === 'active';
+      setIsForeground(active);
+      if (!active) {
+        setQrValue(null);
+        setValidUntilMs(null);
+        setSecondsLeft(0);
+        setLoading(false);
+        setQrError('앱이 다시 활성화되면 새 QR을 발급합니다.');
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   const accentColor = posterColor ? `#${posterColor}` : '#E11D48';
 
   const pulse = useCallback(() => {
@@ -129,45 +153,95 @@ export default function QRScreen() {
     ]).start();
   }, [pulseAnim]);
 
-  const generateQR = useCallback(async () => {
-    if (!wallet || !address) {
+  const generateQR = useCallback(async (signal: AbortSignal): Promise<number | null> => {
+    if (!wallet || !address || !accessToken) {
+      setLoading(false);
       setQrValue(null);
-      setQrError('로그인된 모바일 Wallet이 필요합니다.');
-      return;
+      setQrError('로그인된 모바일 Wallet과 서버 세션이 필요합니다.');
+      return null;
     }
-    const parsedTokenId = Number(tokenId);
-    if (!Number.isSafeInteger(parsedTokenId) || parsedTokenId <= 0) {
+    const normalizedTokenId = String(tokenId ?? '');
+    if (!/^[1-9][0-9]{0,77}$/.test(normalizedTokenId)) {
+      setLoading(false);
       setQrValue(null);
       setQrError('티켓 토큰 정보가 올바르지 않습니다.');
-      return;
+      return null;
     }
-    const payload = {
-      action: 'ticket_checkin',
-      token_id: parsedTokenId,
-      wallet_address: address,
-      timestamp: Math.floor(Date.now() / 1000),
-    };
-    const message = JSON.stringify(payload);
-    const signature = await wallet.signMessage(message);
-
-    setQrValue(JSON.stringify({ payload, signature }));
+    setLoading(true);
+    setQrValue(null);
+    setValidUntilMs(null);
+    setSecondsLeft(0);
     setQrError(null);
-    setSecondsLeft(REFRESH_INTERVAL);
-    pulse();
-  }, [wallet, address, tokenId, pulse]);
+
+    try {
+      const signedQr = await createSignedTicketQr(
+        normalizedTokenId,
+        accessToken,
+        wallet,
+        address,
+        signal,
+      );
+      if (signal.aborted) return null;
+
+      const serverValidityMs = (signedQr.expiresAt - signedQr.issuedAt) * 1000;
+      const safeDisplayMs = serverValidityMs - signedQr.requestElapsedMs - EXPIRY_SAFETY_MS;
+      if (safeDisplayMs <= 0) {
+        throw new Error('QR challenge가 표시 전에 만료되었습니다. 다시 시도해주세요.');
+      }
+
+      const deadline = Date.now() + safeDisplayMs;
+      setQrValue(signedQr.qrValue);
+      setValidUntilMs(deadline);
+      setSecondsLeft(Math.ceil(safeDisplayMs / 1000));
+      pulse();
+      return safeDisplayMs;
+    } catch (error) {
+      if (!signal.aborted) {
+        setQrValue(null);
+        setQrError(error instanceof Error ? error.message : 'QR을 발급하지 못했습니다.');
+      }
+      return null;
+    } finally {
+      if (!signal.aborted) setLoading(false);
+    }
+  }, [wallet, address, accessToken, tokenId, pulse]);
 
   useEffect(() => {
-    generateQR();
-    const iv = setInterval(generateQR, REFRESH_INTERVAL * 1000);
-    return () => clearInterval(iv);
-  }, [generateQR]);
+    if (!isForeground) return;
+
+    let stopped = false;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let controller: AbortController | null = null;
+
+    const refresh = async () => {
+      controller = new AbortController();
+      const nextRefreshMs = await generateQR(controller.signal);
+      if (!stopped && nextRefreshMs !== null) {
+        refreshTimer = setTimeout(refresh, nextRefreshMs);
+      }
+    };
+
+    refresh();
+    return () => {
+      stopped = true;
+      controller?.abort();
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [generateQR, isForeground, refreshKey]);
 
   useEffect(() => {
+    if (!qrValue || validUntilMs === null) return;
+    const updateCountdown = () => {
+      const remaining = Math.max(0, Math.ceil((validUntilMs - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+      if (remaining === 0) setQrValue(null);
+    };
+    updateCountdown();
     const iv = setInterval(() => {
-      setSecondsLeft((n) => (n > 0 ? n - 1 : 0));
-    }, 1000);
+      updateCountdown();
+    }, 250);
     return () => clearInterval(iv);
-  }, [qrValue]);
+  }, [qrValue, validUntilMs]);
 
   return (
     <SafeAreaView style={s.safe}>
@@ -214,7 +288,13 @@ export default function QRScreen() {
             />
           ) : (
             <View style={s.qrPlaceholder}>
-              <Text style={s.qrPlaceholderText}>{qrError ?? 'QR 생성 중...'}</Text>
+              {loading ? <ActivityIndicator color="#E11D48" /> : null}
+              <Text style={s.qrPlaceholderText}>{qrError ?? '서버 QR 발급 중...'}</Text>
+              {qrError && isForeground ? (
+                <TouchableOpacity style={s.retryButton} onPress={() => setRefreshKey((value) => value + 1)}>
+                  <Text style={s.retryButtonText}>다시 시도</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           )}
         </Animated.View>
@@ -223,7 +303,7 @@ export default function QRScreen() {
         {qrValue && (
           <View style={s.countdown}>
             <CountdownRing seconds={secondsLeft} total={REFRESH_INTERVAL} />
-            <Text style={s.countdownLabel}>초 후 자동 갱신</Text>
+            <Text style={s.countdownLabel}>서버 만료 전 자동 갱신</Text>
           </View>
         )}
       </View>
@@ -316,8 +396,11 @@ const s = StyleSheet.create({
     height: 216,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 10,
   },
-  qrPlaceholderText: { color: '#9CA3AF', fontSize: 14 },
+  qrPlaceholderText: { color: '#9CA3AF', fontSize: 13, textAlign: 'center', paddingHorizontal: 12 },
+  retryButton: { marginTop: 4, borderRadius: 8, backgroundColor: '#E11D48', paddingHorizontal: 14, paddingVertical: 8 },
+  retryButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   /* 카운트다운 */
   countdown: { alignItems: 'center', gap: 6 },
   ringNum: { fontSize: 20, fontWeight: '700', color: '#FFFFFF' },

@@ -14,6 +14,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { authenticateWallet } from '@/lib/auth';
 
+function displayNameFromKeystore(fileName: string | null) {
+  if (!fileName?.includes('TicketPro_DID_')) return '부경대 학우';
+  return fileName.split('_')[2]?.replace('.json', '') || '부경대 학우';
+}
+
 export default function LoginScreen() {
   const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const { setSession } = useWallet();
@@ -54,7 +59,7 @@ export default function LoginScreen() {
     try {
       const wallet = (await ethers.Wallet.fromEncryptedJson(keystoreJson, password)) as ethers.Wallet;
       const session = await authenticateWallet(wallet);
-      setSession(wallet, session.accessToken, session.accountWalletAddress);
+      setSession(wallet, session.accessToken, session.accountWalletAddress, displayNameFromKeystore(fileName));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('로그인 성공', '로그인되었습니다.', [
         { text: '확인', onPress: () => router.replace(returnTo === '/booking-confirm' ? '/booking-confirm' : '/') },

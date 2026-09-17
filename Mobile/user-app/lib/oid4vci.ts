@@ -28,6 +28,18 @@ export type StoredCredential = {
   storedAt: string;
 };
 
+function isSameCredentialScope(left: StoredCredential, right: StoredCredential): boolean {
+  return left.issuer === right.issuer
+    && left.subject === right.subject
+    && left.credentialConfigurationId === right.credentialConfigurationId;
+}
+
+function deduplicateCredentials(credentials: StoredCredential[]): StoredCredential[] {
+  return credentials.filter((credential, index) => (
+    credentials.findIndex((candidate) => isSameCredentialScope(candidate, credential)) === index
+  ));
+}
+
 function base64url(bytes: Uint8Array): string {
   return ethers
     .encodeBase64(bytes)
@@ -151,7 +163,12 @@ export async function verifyAndStoreCredential(
   const existing = await loadCredentials();
   await AsyncStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify([stored, ...existing.filter((item) => item.id !== stored.id)]),
+    JSON.stringify([
+      stored,
+      ...existing.filter((item) => (
+        item.id !== stored.id && !isSameCredentialScope(item, stored)
+      )),
+    ]),
   );
   return stored;
 }
@@ -161,7 +178,12 @@ export async function loadCredentials(): Promise<StoredCredential[]> {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    const deduplicated = deduplicateCredentials(parsed);
+    if (deduplicated.length !== parsed.length) {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(deduplicated));
+    }
+    return deduplicated;
   } catch {
     return [];
   }

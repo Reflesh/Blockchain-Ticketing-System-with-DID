@@ -5,7 +5,8 @@ type WalletContextType = {
   address: string | null;
   wallet: ethers.Wallet | null;
   accessToken: string | null;
-  setSession: (wallet: ethers.Wallet | null, accessToken: string | null, accountAddress?: string) => void;
+  displayName: string;
+  setSession: (wallet: ethers.Wallet | null, accessToken: string | null, accountAddress?: string, displayName?: string) => void;
   logout: () => void;
 };
 
@@ -15,21 +16,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [wallet, setWalletState] = useState<ethers.Wallet | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState('TicketPro 회원');
 
-  const setSession = (newWallet: ethers.Wallet | null, newToken: string | null, accountAddress?: string) => {
+  const setSession = (newWallet: ethers.Wallet | null, newToken: string | null, accountAddress?: string, nextDisplayName?: string) => {
     setWalletState(newWallet);
     setAddress(accountAddress ?? newWallet?.address ?? null);
     setAccessToken(newToken);
+    setDisplayName(nextDisplayName || 'TicketPro 회원');
   };
 
   const logout = () => {
     setWalletState(null);
     setAddress(null);
     setAccessToken(null);
+    setDisplayName('TicketPro 회원');
   };
 
   return (
-    <WalletContext.Provider value={{ address, wallet, accessToken, setSession, logout }}>
+    <WalletContext.Provider value={{ address, wallet, accessToken, displayName, setSession, logout }}>
       {children}
     </WalletContext.Provider>
   );

@@ -4,7 +4,7 @@ try:
         EventUpdateRequest, HTTPException, LoginRequest, PRIVATE_KEY, Query,
         Request, SEAT_STATUSES, SESSION_STATUSES, SeatBulkCreateRequest,
         SeatUpdateRequest, SessionCreateRequest, SessionUpdateRequest,
-        SignUpRequest, TicketRequest, TransferRequest, VerifyRequest,
+        SignUpRequest, TicketRequest, TransferRequest, UserProfileResponse, VerifyRequest,
         WishlistRequest, app, blank_to_none, cancel_portone_v2_payment,
         contract, count_rows, create_admin_token, encode_defunct,
         event_to_ticket, fetch_one_or_404, format_price_display,
@@ -24,7 +24,7 @@ except ImportError:
         EventUpdateRequest, HTTPException, LoginRequest, PRIVATE_KEY, Query,
         Request, SEAT_STATUSES, SESSION_STATUSES, SeatBulkCreateRequest,
         SeatUpdateRequest, SessionCreateRequest, SessionUpdateRequest,
-        SignUpRequest, TicketRequest, TransferRequest, VerifyRequest,
+        SignUpRequest, TicketRequest, TransferRequest, UserProfileResponse, VerifyRequest,
         WishlistRequest, app, blank_to_none, cancel_portone_v2_payment,
         contract, count_rows, create_admin_token, encode_defunct,
         event_to_ticket, fetch_one_or_404, format_price_display,
@@ -282,7 +282,8 @@ async def user_bookings_api(wallet_address: str, session_wallet=Depends(require_
                                     'seat_code', bi.seat_code,
                                     'owner_wallet_address', bi.owner_wallet_address,
                                     'companion_wallet_address', bi.companion_wallet_address,
-                                    'token_id', bi.token_id,
+                                    -- JavaScript의 Number 안전 범위를 넘는 token ID도 정확히 전달한다.
+                                    'token_id', bi.token_id::text,
                                     'is_transferred', bi.is_transferred,
                                     'ticket_status', bi.ticket_status,
                                     'unit_price', bi.unit_price
@@ -346,6 +347,41 @@ async def user_bookings_api(wallet_address: str, session_wallet=Depends(require_
     except Exception as e:
         print(f"예매 내역 조회 에러: {str(e)}")
         raise HTTPException(status_code=500, detail="예매 내역을 불러오지 못했습니다.")
+
+@app.get(
+    "/api/users/{wallet_address}/profile",
+    summary="사용자 프로필 조회",
+    response_model=UserProfileResponse,
+)
+async def user_profile_api(wallet_address: str, session_wallet=Depends(require_user_session)):
+    try:
+        require_matching_wallet(session_wallet, wallet_address)
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT username, auth_provider, verification_status
+                    FROM users
+                    WHERE LOWER(wallet_address) = LOWER(%s)
+                    """,
+                    (wallet_address,),
+                )
+                user = cursor.fetchone()
+
+        return {
+            "status": "success",
+            "data": {
+                "wallet_address": wallet_address,
+                "display_name": (user or {}).get("username") or "TicketPro 회원",
+                "auth_provider": (user or {}).get("auth_provider") or "did_keystore",
+                "verification_status": (user or {}).get("verification_status") or "verified",
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"사용자 프로필 조회 에러: {str(e)}")
+        raise HTTPException(status_code=500, detail="사용자 프로필을 불러오지 못했습니다.")
 
 @app.get("/api/users/{wallet_address}/wishlist", summary="사용자 찜 목록 조회")
 async def user_wishlist_api(wallet_address: str, session_wallet=Depends(require_user_session)):

@@ -20,10 +20,10 @@ import base64
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 try:
-    from .auth_s2s import AuthGateway, AuthServiceUnavailable
+    from .auth_s2s import ADDRESS, AuthGateway, AuthServiceUnavailable, SessionIdentity
     from .auth_routes import install_gateway_routes
 except ImportError:
-    from auth_s2s import AuthGateway, AuthServiceUnavailable
+    from auth_s2s import ADDRESS, AuthGateway, AuthServiceUnavailable, SessionIdentity
     from auth_routes import install_gateway_routes
 
 # =================================================================
@@ -104,6 +104,7 @@ def init_db():
                     "booking_items",
                     "payments",
                     "blockchain_transactions",
+                    "ticket_qr_challenges",
                 ]
                 if AUTH_VALIDATION_MODE == "db":
                     required_tables.extend(["issued_vcs", "revoked_vcs", "user_login_sessions"])
@@ -298,7 +299,7 @@ def sign_admin_payload(payload_part):
 def hash_user_session_token(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
-def require_user_session(authorization: Optional[str] = Header(default=None)):
+def require_user_identity(authorization: Optional[str] = Header(default=None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="DID 로그인 세션 토큰이 필요합니다.")
 
@@ -308,18 +309,19 @@ def require_user_session(authorization: Optional[str] = Header(default=None)):
 
     if AUTH_VALIDATION_MODE == "internal":
         try:
-            wallet_address = AUTH_GATEWAY.session_wallet(token)
+            identity = AUTH_GATEWAY.session_identity(token)
         except AuthServiceUnavailable:
             raise HTTPException(status_code=503, detail="인증 서비스를 일시적으로 이용할 수 없습니다. 잠시 후 다시 시도해주세요.") from None
-        if wallet_address is None:
+        if identity is None:
             raise HTTPException(status_code=401, detail="DID 로그인 세션이 만료되었거나 유효하지 않습니다.")
-        return wallet_address
+        return identity
 
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT COALESCE(s.subject_wallet_address, s.wallet_address) AS wallet_address,
+                SELECT COALESCE(s.subject_wallet_address, s.wallet_address) AS account_wallet_address,
+                       s.wallet_address AS signer_wallet_address,
                        principal.expires_at AS vc_expires_at,
                        mobile.expires_at AS mobile_expires_at
                 FROM user_login_sessions s
@@ -357,7 +359,15 @@ def require_user_session(authorization: Optional[str] = Header(default=None)):
             raise HTTPException(status_code=401, detail="모바일 인증서 만료 정보를 확인할 수 없습니다.")
         if datetime.now(timezone.utc) > mobile_expires_at:
             raise HTTPException(status_code=401, detail="모바일 인증서가 만료되었습니다.")
-    return session["wallet_address"]
+    account_address = session["account_wallet_address"]
+    signer_address = session["signer_wallet_address"]
+    if not ADDRESS.fullmatch(account_address or "") or not ADDRESS.fullmatch(signer_address or ""):
+        raise HTTPException(status_code=401, detail="로그인 세션의 지갑 주소를 확인할 수 없습니다.")
+    return SessionIdentity(account_address, signer_address)
+
+def require_user_session(authorization: Optional[str] = Header(default=None)):
+    """기존 API 호환을 위해 부모 계정 Wallet 주소만 반환한다."""
+    return require_user_identity(authorization).account_wallet_address
 
 def require_matching_wallet(session_wallet, requested_wallet):
     if session_wallet.lower() != requested_wallet.lower():
@@ -612,6 +622,16 @@ class WishlistRequest(BaseModel):
     wallet_address: str
     event_id: int
 
+class UserProfileData(BaseModel):
+    wallet_address: str
+    display_name: str
+    auth_provider: str
+    verification_status: str
+
+class UserProfileResponse(BaseModel):
+    status: str
+    data: UserProfileData
+
 class TicketRequest(BaseModel):
     username: Optional[str] = None
     wallet_address: str
@@ -686,8 +706,11 @@ def install_api_routes():
         sys.modules.setdefault("blockchain_backend", sys.modules[__name__])
     try:
         from . import blockchain_backend_api
+        from .ticket_qr import install_ticket_qr_routes
     except ImportError:
         import blockchain_backend_api
+        from ticket_qr import install_ticket_qr_routes
+    install_ticket_qr_routes(app, get_db_connection, require_user_identity)
     return blockchain_backend_api
 
 

@@ -15,7 +15,8 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const TICKET_API_URL = process.env.EXPO_PUBLIC_TICKET_API_URL || 'http://43.201.77.114:8000/api';
+import { TICKET_API_URL } from '../constants/api';
+
 const FRAME_SIZE = 260;
 const CORNER = 28;
 const CORNER_W = 3;

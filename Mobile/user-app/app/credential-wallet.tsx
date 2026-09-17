@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { router, useFocusEffect } from 'expo-router';
+import { Redirect, router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -46,6 +46,7 @@ export default function CredentialWalletScreen() {
   const [walletPassword, setWalletPassword] = useState('');
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletProgress, setWalletProgress] = useState<number | null>(null);
+  const [loginComplete, setLoginComplete] = useState(false);
 
   const refreshCredentials = useCallback(() => {
     loadCredentials().then(setCredentials).catch(() => setCredentials([]));
@@ -79,6 +80,7 @@ export default function CredentialWalletScreen() {
           const session = await authenticateWallet(unlocked);
           setSession(unlocked, session.accessToken, session.accountWalletAddress);
           setStatus('Wallet 잠금 해제 및 서버 로그인을 완료했습니다.');
+          setLoginComplete(true);
         } catch (loginError) {
           setSession(unlocked, null);
           const loginMessage = loginError instanceof Error
@@ -193,6 +195,10 @@ export default function CredentialWalletScreen() {
       },
     ]);
   };
+
+  if (loginComplete) {
+    return <Redirect href="/" />;
+  }
 
   if (scannerOpen) {
     return (

@@ -68,6 +68,12 @@ class AuthBytesReply:
     retry_after: str = ""
 
 
+@dataclass(frozen=True)
+class SessionIdentity:
+    account_wallet_address: str
+    signer_wallet_address: str
+
+
 class AuthGateway:
     def __init__(self, base_url="", key="", timeout=5.0, opener=None):
         self.base_url = base_url.rstrip("/")
@@ -176,16 +182,26 @@ class AuthGateway:
                 ValueError, UnicodeError, json.JSONDecodeError):
             raise AuthServiceUnavailable("인증 서비스를 일시적으로 이용할 수 없습니다.") from None
 
-    def session_wallet(self, token):
+    def session_identity(self, token):
         result = self.call("POST", "/internal/sessions/introspect", {"token": token})
         if result.status != 200 or type(result.body.get("active")) is not bool:
             raise AuthServiceUnavailable("인증 서버 응답을 처리할 수 없습니다.")
         if not result.body["active"]:
             return None
-        address = result.body.get("wallet_address")
-        if not isinstance(address, str) or not ADDRESS.fullmatch(address):
+        account_address = result.body.get("wallet_address")
+        signer_address = result.body.get("signer_wallet_address")
+        if (
+            not isinstance(account_address, str)
+            or not ADDRESS.fullmatch(account_address)
+            or not isinstance(signer_address, str)
+            or not ADDRESS.fullmatch(signer_address)
+        ):
             raise AuthServiceUnavailable("인증 서버 응답을 처리할 수 없습니다.")
-        return address
+        return SessionIdentity(account_address, signer_address)
+
+    def session_wallet(self, token):
+        identity = self.session_identity(token)
+        return identity.account_wallet_address if identity else None
 
     def credential_valid(self, address):
         result = self.call("POST", "/internal/credentials/check", {"wallet_address": address})
@@ -211,13 +227,35 @@ def inspect_session(connection_factory, token, now):
     with connection_factory() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                """SELECT s.wallet_address, s.expires_at,
-                          v.expires_at AS vc_expires_at
-                   FROM user_login_sessions s
-                   JOIN issued_vcs v ON LOWER(v.wallet_address) = LOWER(s.wallet_address)
-                   LEFT JOIN revoked_vcs r ON LOWER(r.wallet_address) = LOWER(s.wallet_address)
-                   WHERE s.token_hash = %s AND s.expires_at > %s
-                     AND s.revoked_at IS NULL AND r.wallet_address IS NULL""",
+                """
+                SELECT COALESCE(s.subject_wallet_address, s.wallet_address) AS wallet_address,
+                       s.wallet_address AS signer_wallet_address,
+                       s.expires_at,
+                       COALESCE(direct.expires_at, principal.expires_at) AS vc_expires_at,
+                       mobile.expires_at AS mobile_expires_at
+                FROM user_login_sessions s
+                LEFT JOIN issued_vcs direct
+                  ON LOWER(direct.wallet_address) = LOWER(s.wallet_address)
+                LEFT JOIN mobile_credentials mobile
+                  ON LOWER(mobile.wallet_address) = LOWER(s.wallet_address)
+                LEFT JOIN issued_vcs principal
+                  ON principal.ci_hash = mobile.ci_hash
+                 AND LOWER(principal.wallet_address) = LOWER(mobile.parent_wallet_address)
+                LEFT JOIN revoked_vcs direct_revoked
+                  ON LOWER(direct_revoked.wallet_address) = LOWER(direct.wallet_address)
+                LEFT JOIN revoked_vcs principal_revoked
+                  ON LOWER(principal_revoked.wallet_address) = LOWER(principal.wallet_address)
+                WHERE s.token_hash = %s
+                  AND s.expires_at > %s
+                  AND s.revoked_at IS NULL
+                  AND (
+                    (direct.wallet_address IS NOT NULL AND direct_revoked.wallet_address IS NULL)
+                    OR
+                    (mobile.wallet_address IS NOT NULL AND mobile.revoked_at IS NULL
+                     AND principal.wallet_address IS NOT NULL
+                     AND principal_revoked.wallet_address IS NULL)
+                  )
+                """,
                 (hashlib.sha256(token.encode("utf-8")).hexdigest(), now))
             row = cursor.fetchone()
     if not row:
@@ -225,8 +263,18 @@ def inspect_session(connection_factory, token, now):
     expiry = expiry_timestamp(row["vc_expires_at"])
     if expiry is None or expiry <= now:
         return {"active": False}
-    return {"active": True, "wallet_address": row["wallet_address"],
-            "expires_at": row["expires_at"], "vc_expires_at": expiry}
+    mobile_expiry = expiry_timestamp(row["mobile_expires_at"])
+    if row["mobile_expires_at"] is not None and (
+        mobile_expiry is None or mobile_expiry <= now
+    ):
+        return {"active": False}
+    return {
+        "active": True,
+        "wallet_address": row["wallet_address"],
+        "signer_wallet_address": row["signer_wallet_address"],
+        "expires_at": row["expires_at"],
+        "vc_expires_at": expiry,
+    }
 
 
 def inspect_credential(connection_factory, address, now):
