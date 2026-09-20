@@ -63,10 +63,6 @@ cd /home/admin/file0911/Backend
 ./venv/bin/python run_server.py backend
 ```
 
-Main과 Auth가 별도 서버에 있는 배포에서는
-`.env.backend.runtime.example`을 `.env.backend.runtime`으로 복사하고 Auth의 사설 IP를
-입력한다. `AUTH_SERVICE_KEY`는 기존 `.env`의 값을 그대로 사용한다.
-
 ## 설정 우선순위와 다른 설정 파일 사용
 
 터미널 또는 systemd에서 주입한 환경변수가 `.env`보다 우선한다. 한 컴퓨터에서 두
@@ -92,7 +88,6 @@ Main과 Auth가 별도 서버에 있는 배포에서는
 
 - `.env.auth.example`, `.env.backend.example`: 가능
 - `.env.auth.runtime.example`: 가능
-- `.env.backend.runtime.example`: 가능
 - `run_server.py`, 이 문서: 가능
 - 실제 `.env`, `.env.auth.runtime`, `.env.backend.runtime`: 금지
 - DB 비밀번호, Issuer/Ticket 개인키, Gmail 앱 비밀번호, `AUTH_SERVICE_KEY`: 금지

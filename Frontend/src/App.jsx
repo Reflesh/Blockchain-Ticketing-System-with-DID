@@ -795,17 +795,6 @@ function App() {
         try {
           const json = e.target.result
           const wallet = await ethers.Wallet.fromEncryptedJson(json, keystorePassword)
-          const challengeRes = await axios.post(`${AUTH_API_URL}/login-challenge`, {
-            wallet_address: wallet.address,
-          })
-          const { nonce, message } = challengeRes.data
-          const signature = await wallet.signMessage(message)
-          const loginRes = await axios.post(`${AUTH_API_URL}/login-verify`, {
-            wallet_address: wallet.address,
-            nonce,
-            message,
-            signature,
-          })
           let extractedName = '부경대 학우'
           if (keystoreFile.name.includes('TicketPro_DID_')) {
             extractedName = keystoreFile.name.split('_')[2].replace('.json', '')
@@ -843,7 +832,6 @@ function App() {
           }
 
           alert(`로그인 성공! 지갑 주소: ${wallet.address}`)
-          setUserToken(loginRes.data.access_token)
           setCurrentWallet(wallet)
           setUserToken(accessToken)
           setCurrentUser({ username: extractedName, walletAddress: accountWalletAddress, isDID: true })
@@ -929,13 +917,31 @@ function App() {
 
     setIsLoading(true)
     try {
-      const paymentId = `ticket_${uuidv4_light()}`;
+      const paymentId = `ticket_${crypto.randomUUID().replaceAll('-', '')}`;
       const PORTONE_STORE_ID = import.meta.env.VITE_PORTONE_STORE_ID || 'store-xxxxxxxx';
       const PORTONE_CHANNEL_KEY = import.meta.env.VITE_PORTONE_CHANNEL_KEY || 'channel-key-d3965469-2d57-4114-9b5c-c7b5f45ff655';
 
       const orderName = selectedSeats.length > 1
         ? `${selectedTicket.name} 외 ${selectedSeats.length - 1}매`
         : selectedTicket.name
+
+      const signPayload = {
+        wallet_address: currentUser.walletAddress,
+        event_id: selectedTicket.id,
+        event_session_id: selectedSession.id,
+        seat_ids: orderedSeatIds,
+        payment_id: paymentId,
+      };
+      const signature = await currentWallet.signMessage(JSON.stringify(signPayload));
+
+      const prepareResponse = await axios.post(`${TICKET_API_URL}/checkout/prepare`, {
+        ...signPayload,
+        signature,
+      }, { headers: getUserHeaders() });
+      const preparedAmount = Number(prepareResponse.data?.data?.total_amount);
+      if (preparedAmount !== totalAmount) {
+        throw new Error('서버가 계산한 결제 금액과 화면의 금액이 일치하지 않습니다. 좌석을 다시 선택해주세요.');
+      }
 
       const responsePay = await window.PortOne.requestPayment({
         storeId: PORTONE_STORE_ID,
@@ -951,24 +957,25 @@ function App() {
       });
 
       if (responsePay.code) {
+        try {
+          await axios.post(`${TICKET_API_URL}/checkout/release`, {
+            wallet_address: currentUser.walletAddress,
+            payment_id: paymentId,
+          }, { headers: getUserHeaders() });
+        } catch (releaseError) {
+          console.error('결제 취소 후 좌석 선점 해제 실패', releaseError);
+        }
         alert(`결제가 취소되었거나 실패했습니다.\n사유: ${responsePay.message}`);
         return;
       }
 
       alert('💳 오프체인 원화 결제가 정상 완료되었습니다!\n이어서 티켓 위조 방지 블록체인 등록을 위한 암호학적 전자서명을 진행합니다.');
 
-      // 서명 페이로드: companions 배열 삭제
-      const signPayload = {
-        wallet_address: currentUser.walletAddress,
-        event_id: selectedTicket.id,
-        event_session_id: selectedSession.id,
-        seat_ids: orderedSeatIds,
-        payment_id: responsePay.paymentId,
-      };
+      if (responsePay.paymentId !== paymentId) {
+        throw new Error('결제 응답의 결제 ID가 좌석 선점 정보와 일치하지 않습니다.');
+      }
 
-      const signature = await currentWallet.signMessage(JSON.stringify(signPayload));
-
-      alert('🔒 전자서명 생성이 완료되었습니다.\n서버 가스비 대납 민팅을 요청합니다. 잠시만 기다려 주세요...');
+      alert('🔒 결제와 전자서명 확인이 완료되었습니다.\n서버 가스비 대납 민팅을 요청합니다. 잠시만 기다려 주세요...');
 
       const responseBack = await axios.post(`${TICKET_API_URL}/buy-tickets`, {
         username: currentUser.walletAddress,
@@ -976,7 +983,11 @@ function App() {
         signature,
       }, { headers: getUserHeaders() });
 
-      alert(`🎉 예매 완료 및 스마트 위변조 방지 NFT 티켓이 지갑으로 안전하게 발급되었습니다!\n\n[Transaction Hash]\n${responseBack.data.transaction_hash}`);
+      if (responseBack.data?.status === 'pending') {
+        alert(`⏳ 결제와 좌석 확정은 완료되었으며 블록체인 발급을 확인 중입니다.\n마이페이지에서 잠시 후 상태를 확인해주세요.\n\n[Transaction Hash]\n${responseBack.data.transaction_hash}`);
+      } else {
+        alert(`🎉 예매 완료 및 스마트 위변조 방지 NFT 티켓이 지갑으로 안전하게 발급되었습니다!\n\n[Transaction Hash]\n${responseBack.data.transaction_hash}`);
+      }
 
       setSelectedSeats([]);
       setSelectedSeat(null);
@@ -1011,7 +1022,7 @@ function App() {
     setIsTransferring(false)
   }
 
-  // 🎟️ 양도 실행 (입력한 닉네임 기반)
+  // 🎟️ EIP-712 사용자 서명 후 서버가 Polygon 가스비를 대납해 양도
   const handleTransferTicket = async () => {
     if (!selectedTransferItem) {
       alert('양도할 티켓을 선택해주세요.')
@@ -1035,20 +1046,43 @@ function App() {
 
     setIsTransferring(true)
     try {
-      const signPayload = {
+      const challengePayload = {
         wallet_address: currentUser.walletAddress,
         booking_item_id: selectedTransferItem.booking_item_id,
         companion_username: targetNickname
       }
-      const signature = await currentWallet.signMessage(JSON.stringify(signPayload))
+      const challengeResponse = await axios.post(
+        `${TICKET_API_URL}/transfer-ticket/challenge`,
+        challengePayload,
+        { headers: getUserHeaders() },
+      )
+      const challenge = challengeResponse.data?.data
+      if (!challenge?.domain || !challenge?.types || !challenge?.message) {
+        throw new Error('양도 서명 요청 형식이 올바르지 않습니다.')
+      }
+      const signature = await currentWallet.signTypedData(
+        challenge.domain,
+        challenge.types,
+        challenge.message,
+      )
 
       const response = await axios.post(`${TICKET_API_URL}/transfer-ticket`, {
-        ...signPayload,
+        ...challengePayload,
+        nonce: Number(challenge.message.nonce),
+        deadline: Number(challenge.message.deadline),
         signature,
       }, {
         headers: getUserHeaders(),
       })
 
+      if (response.data?.status === 'pending') {
+        alert(
+          `양도 트랜잭션이 Polygon에 제출되어 확인을 기다리고 있습니다.\n\n` +
+          `[Transaction Hash]\n${response.data.transaction_hash}`
+        )
+        closeTransferModal()
+        return
+      }
       alert(
         `🎉 티켓이 ${targetNickname} 님에게 성공적으로 양도되었습니다!\n\n` +
         `[Transaction Hash]\n${response.data.transaction_hash}`
@@ -1061,13 +1095,6 @@ function App() {
     } finally {
       setIsTransferring(false)
     }
-  }
-
-  function uuidv4_light() {
-    return 'xxxxxx'.replace(/[xy]/g, function(c) {
-      var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    }).toUpperCase();
   }
 
   const handleWish = async () => {

@@ -15,55 +15,22 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { TICKET_API_URL } from '../constants/api';
-
+const TICKET_API_URL = process.env.EXPO_PUBLIC_TICKET_API_URL || 'http://43.201.77.114:8000/api';
 const FRAME_SIZE = 260;
 const CORNER = 28;
 const CORNER_W = 3;
 const CORNER_COLOR = '#22C55E';
 
-// ⚠️ 개발용 — 입장 불가 사유 목록. 탭할 때마다 랜덤 출력. 배포 전 제거할 것
-const FAIL_REASONS = [
-  'QR이 만료되었습니다.',
-  'QR 형식이 올바르지 않습니다.',
-  '서명 검증에 실패했습니다. 위변조가 의심됩니다.',
-  '이미 사용된 티켓입니다.',
-  '환불 처리된 티켓입니다.',
-  '양도 취소된 티켓입니다.',
-  '다른 회차의 티켓입니다.',
-  '다른 공연장의 티켓입니다.',
-];
-
-// ⚠️ 백엔드 검증 API가 없어서 넣은 임시 로직
-// 나중에 실제 서버 엔드포인트 생기면 이 함수만 fetch 호출로 교체하면 됨
-function mockVerifyCheckin(scannedData: string): {
+type AdminInfo = { login_id: string; display_name: string; role: string };
+type ScanResult = {
   valid: boolean;
   reason: string;
-  tokenId?: number;
-} {
-  try {
-    const parsed = JSON.parse(scannedData);
-    if (!parsed.payload || !parsed.signature) {
-      return { valid: false, reason: 'QR 형식이 올바르지 않습니다.' };
-    }
-    const ageSeconds =
-      Math.floor(Date.now() / 1000) -
-      (parsed.payload.timestamp ?? Math.floor(Date.now() / 1000));
-    if (!parsed.payload.mock && (ageSeconds > 60 || ageSeconds < -10)) {
-      return { valid: false, reason: 'QR이 만료되었습니다.' };
-    }
-    return {
-      valid: true,
-      reason: '입장이 확인되었습니다.',
-      tokenId: parsed.payload.token_id,
-    };
-  } catch {
-    return { valid: false, reason: 'QR을 읽을 수 없습니다.' };
-  }
-}
-
-type AdminInfo = { login_id: string; display_name: string; role: string };
-type ScanResult = { valid: boolean; reason: string; tokenId?: number } | null;
+  tokenId?: string;
+  eventTitle?: string;
+  venue?: string;
+  sessionName?: string;
+  seatCode?: string;
+} | null;
 
 // ─────────────────────────────────────────
 // 루트
@@ -84,6 +51,7 @@ export default function App() {
   }
   return (
     <ScannerScreen
+      adminToken={adminToken}
       adminInfo={adminInfo}
       onLogout={() => {
         setAdminToken(null);
@@ -128,15 +96,6 @@ function LoginScreen({
     } finally {
       setLoading(false);
     }
-  };
-
-  // ⚠️ 개발용 — 백엔드 없이 스캐너 화면 바로 진입. 배포 전 제거할 것
-  const devLogin = () => {
-    onLoginSuccess('dev-token', {
-      login_id: 'admin',
-      display_name: '관리자',
-      role: 'admin',
-    });
   };
 
   return (
@@ -191,9 +150,6 @@ function LoginScreen({
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity onPress={devLogin} style={s.devBtn}>
-            <Text style={s.devText}>개발용 빠른 입장</Text>
-          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -204,16 +160,16 @@ function LoginScreen({
 // 스캐너 화면
 // ─────────────────────────────────────────
 function ScannerScreen({
+  adminToken,
   adminInfo,
   onLogout,
 }: {
+  adminToken: string;
   adminInfo: AdminInfo | null;
   onLogout: () => void;
 }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [result, setResult] = useState<ScanResult>(null);
-  const [manualMode, setManualMode] = useState(false);
-  const [manualCode, setManualCode] = useState('');
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const scanLock = useRef(false); // 중복 스캔 방지
@@ -221,35 +177,46 @@ function ScannerScreen({
   const frameLeft = (width - FRAME_SIZE) / 2;
   const frameTop = (height - FRAME_SIZE) / 2;
 
-  const handleScan = ({ data }: { data: string }) => {
+  const handleScan = async ({ data }: { data: string }) => {
     if (scanLock.current) return;
     scanLock.current = true;
-    const verified = mockVerifyCheckin(data);
-    Haptics.notificationAsync(
-      verified.valid
-        ? Haptics.NotificationFeedbackType.Success
-        : Haptics.NotificationFeedbackType.Error
-    );
-    setResult(verified);
+    try {
+      const response = await fetch(`${TICKET_API_URL}/admin/ticket-checkins/verify`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        },
+        body: JSON.stringify({ qr_data: data }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof body?.detail === 'string' ? body.detail : `검증 실패 (HTTP ${response.status})`);
+      }
+      const ticket = body?.data ?? {};
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setResult({
+        valid: true,
+        reason: body?.message ?? '티켓 검증과 입장 처리가 완료되었습니다.',
+        tokenId: ticket.token_id === undefined ? undefined : String(ticket.token_id),
+        eventTitle: ticket.event_title,
+        venue: ticket.venue,
+        sessionName: ticket.session_name,
+        seatCode: ticket.seat_code,
+      });
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      setResult({
+        valid: false,
+        reason: error instanceof Error ? error.message : '서버에서 티켓을 검증하지 못했습니다.',
+      });
+    }
   };
 
   const handleRescan = () => {
     setResult(null);
     scanLock.current = false; // 재스캔 시 잠금 해제
-  };
-
-  const handleManualVerify = () => {
-    const code = manualCode.replace(/\s/g, '');
-    if (code.length !== 6 || !/^\d{6}$/.test(code)) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('입력 오류', '6자리 숫자를 입력해주세요.');
-      return;
-    }
-    // ⚠️ 개발용 — 실제 배포 시 서버에서 코드 검증 필요
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setResult({ valid: true, reason: '코드 수동 인증 완료', tokenId: undefined });
-    setManualCode('');
-    setManualMode(false);
   };
 
   if (!permission) {
@@ -321,77 +288,12 @@ function ScannerScreen({
           </Text>
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity
-            style={[s.topBarBadge, manualMode && s.topBarBadgeActive]}
-            onPress={() => { setManualMode(v => !v); setManualCode(''); }}
-            accessibilityLabel="코드 입력 모드"
-          >
-            <Text style={s.topBarBadgeText}>코드 입력</Text>
-          </TouchableOpacity>
           <TouchableOpacity style={s.topBarBadge} onPress={onLogout} accessibilityLabel="로그아웃">
             <Text style={s.topBarBadgeText}>로그아웃</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* 수동 코드 입력 패널 */}
-      {manualMode && (
-        <View style={[s.manualPanel, { top: insets.top + 56 }]}>
-          <Text style={s.manualTitle}>수동 코드 인증</Text>
-          <Text style={s.manualSub}>QR 화면에 표시된 6자리 숫자를 입력하세요</Text>
-          <View style={s.manualInputRow}>
-            <TextInput
-              style={s.manualInput}
-              placeholder="000 000"
-              placeholderTextColor="#4B5563"
-              keyboardType="number-pad"
-              maxLength={7}
-              value={manualCode}
-              onChangeText={(t) => {
-                const digits = t.replace(/\D/g, '').slice(0, 6);
-                setManualCode(digits.length > 3 ? digits.slice(0, 3) + ' ' + digits.slice(3) : digits);
-              }}
-              autoFocus
-            />
-            <TouchableOpacity
-              style={[s.manualConfirmBtn, manualCode.replace(/\s/g,'').length !== 6 && { opacity: 0.4 }]}
-              onPress={handleManualVerify}
-              disabled={manualCode.replace(/\s/g,'').length !== 6}
-            >
-              <Text style={s.manualConfirmText}>확인</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* ⚠️ 개발용 — 실제 QR 스캔 없이 결과 화면 확인용. 배포 전 제거할 것 */}
-      <View style={[s.testBtnWrap, { bottom: insets.bottom + 24 }]}>
-        <TouchableOpacity
-          style={s.testBtnPass}
-          onPress={() =>
-            setResult({
-              valid: true,
-              reason: '입장이 확인되었습니다. (테스트)',
-              tokenId: 42,
-            })
-          }
-        >
-          <Text style={s.testBtnText}>테스트: 입장 가능 →</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={s.testBtnFail}
-          onPress={() =>
-            setResult({
-              valid: false,
-              reason:
-                FAIL_REASONS[Math.floor(Math.random() * FAIL_REASONS.length)] +
-                ' (테스트)',
-            })
-          }
-        >
-          <Text style={s.testBtnText}>테스트: 입장 불가 →</Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
@@ -404,7 +306,7 @@ function ResultScreen({
   adminInfo,
   onRescan,
 }: {
-  result: { valid: boolean; reason: string; tokenId?: number };
+  result: NonNullable<ScanResult>;
   adminInfo: AdminInfo | null;
   onRescan: () => void;
 }) {
@@ -424,6 +326,12 @@ function ResultScreen({
           {isPass ? '입장 가능' : '입장 불가'}
         </Text>
         <Text style={s.resultReason}>{result.reason}</Text>
+        {result.valid && result.eventTitle && (
+          <Text style={s.resultReason}>
+            {result.eventTitle}{result.sessionName ? ` · ${result.sessionName}` : ''}{'\n'}
+            {result.venue ?? ''}{result.seatCode ? ` · ${result.seatCode}` : ''}
+          </Text>
+        )}
         {result.tokenId !== undefined && (
           <View style={s.tokenBox}>
             <Text style={s.tokenLabel}>티켓 토큰</Text>

@@ -294,3 +294,4 @@ def inspect_credential(connection_factory, address, now):
     if expiry is None or expiry <= now:
         return {"valid": False, "reason_code": "EXPIRED"}
     return {"valid": True, "reason_code": "ACTIVE", "expires_at": expiry}
+

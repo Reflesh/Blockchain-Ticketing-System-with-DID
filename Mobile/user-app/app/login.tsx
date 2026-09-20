@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
   Alert, Animated, KeyboardAvoidingView, Platform,
@@ -14,13 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { authenticateWallet } from '@/lib/auth';
 
-function displayNameFromKeystore(fileName: string | null) {
-  if (!fileName?.includes('TicketPro_DID_')) return '부경대 학우';
-  return fileName.split('_')[2]?.replace('.json', '') || '부경대 학우';
-}
-
 export default function LoginScreen() {
-  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
   const { setSession } = useWallet();
   const [keystoreJson, setKeystoreJson] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -59,10 +53,10 @@ export default function LoginScreen() {
     try {
       const wallet = (await ethers.Wallet.fromEncryptedJson(keystoreJson, password)) as ethers.Wallet;
       const session = await authenticateWallet(wallet);
-      setSession(wallet, session.accessToken, session.accountWalletAddress, displayNameFromKeystore(fileName));
+      setSession(wallet, session.accessToken, session.accountWalletAddress);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('로그인 성공', '로그인되었습니다.', [
-        { text: '확인', onPress: () => router.replace(returnTo === '/booking-confirm' ? '/booking-confirm' : '/') },
+        { text: '확인', onPress: () => router.replace('/') },
       ]);
     } catch (e: any) {
       shake();

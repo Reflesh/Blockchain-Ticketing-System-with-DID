@@ -1,13 +1,15 @@
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 from web3 import Web3
-from web3.exceptions import ContractLogicError
+from web3.exceptions import ContractLogicError, TimeExhausted, TransactionNotFound
 from web3.middleware import ExtraDataToPOAMiddleware
 from psycopg.rows import dict_row
 from eth_account.messages import encode_defunct
 import asyncio
+import fcntl
 import hashlib
 import hmac
 import json
@@ -17,6 +19,7 @@ import requests
 import time
 import uuid
 import base64
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 try:
@@ -53,6 +56,7 @@ PORTONE_V2_SECRET = os.getenv("PORTONE_V2_SECRET")   # V2 결제 검증용 시�
 DATABASE_URL = os.getenv("DATABASE_URL")
 ADMIN_TOKEN_SECRET = os.getenv("ADMIN_TOKEN_SECRET")
 ADMIN_TOKEN_TTL_SECONDS = int(os.getenv("ADMIN_TOKEN_TTL_SECONDS", "7200"))
+EXPECTED_CHAIN_ID = int(os.getenv("CHAIN_ID", "137"))
 
 if not RPC_URL or not PRIVATE_KEY or not CONTRACT_ADDRESS:
     raise Exception("❌ .env 파일에서 블록체인 정보를 불러오지 못했습니다. 변수명이나 파일 위치를 확인하세요.")
@@ -63,7 +67,7 @@ if not DATABASE_URL:
 if not ADMIN_TOKEN_SECRET:
     raise Exception("❌ .env 파일에서 ADMIN_TOKEN_SECRET을 불러오지 못했습니다. 관리자 토큰 서명 키를 확인하세요.")
 
-web3 = Web3(Web3.HTTPProvider(RPC_URL))
+web3 = Web3(Web3.HTTPProvider(RPC_URL, request_kwargs={"timeout": 15}))
 web3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
 if not web3.is_connected():
@@ -79,6 +83,30 @@ except FileNotFoundError:
     raise Exception("❌ TicketABI.json 파일을 찾을 수 없습니다.")
 
 contract = web3.eth.contract(address=web3.to_checksum_address(CONTRACT_ADDRESS), abi=CONTRACT_ABI)
+
+if web3.eth.chain_id != EXPECTED_CHAIN_ID:
+    raise RuntimeError(f"잘못된 블록체인 네트워크입니다: expected={EXPECTED_CHAIN_ID}, actual={web3.eth.chain_id}")
+if not web3.eth.get_code(contract.address):
+    raise RuntimeError("설정된 CONTRACT_ADDRESS에 배포된 코드가 없습니다.")
+try:
+    contract_operator = contract.functions.operator().call()
+    contract.functions.MAX_TICKETS_PER_EVENT().call()
+except Exception as exc:
+    raise RuntimeError("설정된 컨트랙트와 TicketABI.json이 일치하지 않습니다.") from exc
+if contract_operator.lower() != server_account.address.lower():
+    raise RuntimeError("서버 지갑에 컨트랙트 operator 권한이 없습니다.")
+print(f"✅ TicketPro 컨트랙트 연결 완료: {contract.address}")
+
+@contextmanager
+def serialized_server_transaction():
+    """Serialize nonce allocation across workers on this host."""
+    lock_path = f"/tmp/ticketpro-nonce-{server_account.address.lower()}.lock"
+    with open(lock_path, "w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 # =================================================================
 # 2. PostgreSQL(RDS) 연결 확인 및 변환 헬퍼
@@ -104,7 +132,10 @@ def init_db():
                     "booking_items",
                     "payments",
                     "blockchain_transactions",
+                    "checkout_orders",
+                    "checkout_order_items",
                     "ticket_qr_challenges",
+                    "ticket_checkins",
                 ]
                 if AUTH_VALIDATION_MODE == "db":
                     required_tables.extend(["issued_vcs", "revoked_vcs", "user_login_sessions"])
@@ -537,7 +568,7 @@ def get_portone_v2_access_token():
         raise HTTPException(status_code=500, detail=f"포트원 V2 통신 오류: {str(e)}")
 
 # --- 포트원 V2 결제 조회 헬퍼 ---
-def get_portone_v2_payment(payment_id: str):
+def get_portone_v2_payment(payment_id: str, allow_not_found: bool = False):
     try:
         access_token = get_portone_v2_access_token()
         res = requests.get(
@@ -546,6 +577,8 @@ def get_portone_v2_payment(payment_id: str):
             timeout=10
         )
         data = res.json()
+        if res.status_code == 404 and allow_not_found:
+            return None
         if res.status_code != 200:
             raise Exception(data.get("message", "결제 조회 실패"))
         return data
@@ -556,9 +589,13 @@ def get_portone_v2_payment(payment_id: str):
 def cancel_portone_v2_payment(payment_id: str, reason: str, amount: int):
     try:
         access_token = get_portone_v2_access_token()
+        idempotency_digest = hashlib.sha256(f"{payment_id}:{amount}".encode()).hexdigest()
         res = requests.post(
             f"https://api.portone.io/payments/{payment_id}/cancel",
-            headers={"Authorization": f"Bearer {access_token}"},
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Idempotency-Key": f'"ticketpro-{idempotency_digest}"',
+            },
             json={
                 "reason": reason,
                 "amount": amount,
@@ -568,6 +605,10 @@ def cancel_portone_v2_payment(payment_id: str, reason: str, amount: int):
         data = res.json()
         if res.status_code != 200:
             print(f"🚨 V2 환불 실패 API 응답: {data}")
+            return False
+        cancellation_status = (data.get("cancellation") or {}).get("status")
+        if cancellation_status != "SUCCEEDED":
+            print(f"⚠️ V2 환불 미완료 상태: {cancellation_status}")
             return False
         return True
     except Exception as e:
@@ -642,11 +683,30 @@ class TicketRequest(BaseModel):
     payment_id: str
     signature: str
 
+class CheckoutPrepareRequest(BaseModel):
+    wallet_address: str
+    event_id: int
+    event_session_id: int
+    seat_ids: list[int]
+    payment_id: str = Field(min_length=16, max_length=100)
+    signature: str
+
+class CheckoutReleaseRequest(BaseModel):
+    wallet_address: str
+    payment_id: str = Field(min_length=16, max_length=100)
+
 class TransferRequest(BaseModel):
     wallet_address: str
     booking_item_id: int
     companion_username: str
+    nonce: int = Field(ge=0)
+    deadline: int = Field(gt=0)
     signature: str
+
+class TransferChallengeRequest(BaseModel):
+    wallet_address: str
+    booking_item_id: int
+    companion_username: str
 
 class AdminLoginRequest(BaseModel):
     login_id: str
@@ -710,7 +770,15 @@ def install_api_routes():
     except ImportError:
         import blockchain_backend_api
         from ticket_qr import install_ticket_qr_routes
-    install_ticket_qr_routes(app, get_db_connection, require_user_identity)
+    install_ticket_qr_routes(
+        app,
+        get_db_connection,
+        require_user_identity,
+        require_admin,
+        log_admin_action,
+        web3,
+        contract,
+    )
     return blockchain_backend_api
 
 

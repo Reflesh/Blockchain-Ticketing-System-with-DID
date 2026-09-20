@@ -27,7 +27,7 @@ export type BookingItem = {
   seat_code: string;
   owner_wallet_address: string | null;
   companion_wallet_address: string | null;
-  token_id: number | string | null;
+  token_id: string | null;
   is_transferred: boolean;
   ticket_status: string;
   unit_price: number;
@@ -58,20 +58,6 @@ export type UserProfile = {
   display_name: string;
   auth_provider: string;
   verification_status: string;
-};
-
-export type TicketQrChallenge = {
-  v: number;
-  domain: string;
-  purpose: string;
-  challenge_id: string;
-  token_id: string;
-  nonce: string;
-  issued_at: number;
-  expires_at: number;
-  account: string;
-  signer: string;
-  signing_message: string;
 };
 
 type ApiErrorDetail = string | { message?: string };
@@ -115,6 +101,18 @@ function authHeaders(accessToken: string) {
 }
 
 function normalizeBooking(raw: any): Booking {
+  const items: BookingItem[] = Array.isArray(raw?.items)
+    ? raw.items.map((item: any) => ({
+        ...item,
+        booking_item_id: Number(item?.booking_item_id),
+        seat_code: String(item?.seat_code ?? ''),
+        token_id: item?.token_id === null || item?.token_id === undefined
+          ? null
+          : String(item.token_id),
+        ticket_status: String(item?.ticket_status ?? ''),
+        unit_price: Number(item?.unit_price ?? 0),
+      }))
+    : [];
   return {
     ...raw,
     title: String(raw?.title ?? raw?.name ?? ''),
@@ -126,7 +124,7 @@ function normalizeBooking(raw: any): Booking {
     price: String(raw?.price ?? ''),
     total_amount: Number(raw?.total_amount ?? 0),
     txHash: raw?.txHash ?? null,
-    items: Array.isArray(raw?.items) ? raw.items : [],
+    items,
     created_at: raw?.created_at ?? null,
     poster_color: String(raw?.poster_color ?? '#E11D48'),
   };
@@ -154,17 +152,6 @@ export async function getBookings(walletAddress: string, accessToken: string, si
     { headers: authHeaders(accessToken), signal },
   );
   return bookings.map(normalizeBooking);
-}
-
-export function issueTicketQrChallenge(tokenId: string, accessToken: string, signal?: AbortSignal) {
-  return requestData<TicketQrChallenge>(
-    `/tickets/${encodeURIComponent(tokenId)}/qr-challenge`,
-    {
-      method: 'POST',
-      headers: authHeaders(accessToken),
-      signal,
-    },
-  );
 }
 
 export function getWishlist(walletAddress: string, accessToken: string, signal?: AbortSignal) {

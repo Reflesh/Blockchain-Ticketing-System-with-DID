@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Linking,
   Modal,
   ScrollView,
   StyleSheet,
@@ -18,6 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { mapEventResponse, type Concert } from '@/constants/concerts';
+import { TICKET_WEB_URL } from '@/constants/api';
 import { addWishlist, getEvent, getWishlist, removeWishlist } from '@/services/ticketApi';
 
 const TABS = ['상세정보', '기대평', 'Q&A', '공연장정보', '예매유의사항'];
@@ -430,6 +432,24 @@ export default function ConcertDetailScreen() {
     setReplyTargetId(null);
   };
 
+  const openWebBooking = () => {
+    Alert.alert(
+      '웹에서 예매',
+      'TicketPro 앱은 발급된 티켓과 입장 QR을 보여주는 Wallet입니다. 좌석 선택과 결제는 웹에서 진행해주세요.',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '웹 열기',
+          onPress: () => {
+            void Linking.openURL(TICKET_WEB_URL).catch(() => {
+              Alert.alert('웹 열기 실패', 'TicketPro 웹사이트를 열 수 없습니다.');
+            });
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <View style={s.root}>
       {/* ── Poster header ── */}
@@ -592,7 +612,7 @@ export default function ConcertDetailScreen() {
         )}
       </ScrollView>
 
-      {/* ── 예매하기 CTA ── */}
+      {/* ── 웹 예매 안내 CTA ── */}
       <SafeAreaView edges={['bottom']} style={s.ctaWrap}>
         <View style={s.ctaRow}>
         <TouchableOpacity
@@ -608,18 +628,10 @@ export default function ConcertDetailScreen() {
         <TouchableOpacity
           style={[s.ctaBtn, { backgroundColor: accent, shadowColor: accent }]}
           activeOpacity={0.85}
-          onPress={() => router.push({
-            pathname: '/booking/[eventId]',
-            params: {
-              eventId: concert.id,
-              title: concert.title,
-              venue: concert.venue,
-              accentColor: concert.accentColor,
-            },
-          })}
+          onPress={openWebBooking}
         >
-          <Ionicons name="ticket-outline" size={18} color="#fff" />
-          <Text style={s.ctaBtnText}>예매하기</Text>
+          <Ionicons name="open-outline" size={18} color="#fff" />
+          <Text style={s.ctaBtnText}>웹에서 예매</Text>
         </TouchableOpacity>
         </View>
       </SafeAreaView>

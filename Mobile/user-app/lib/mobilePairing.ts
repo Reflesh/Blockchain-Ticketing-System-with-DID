@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 
 import { AUTH_API_URL } from '@/constants/api';
+import { verifySessionAccount } from '@/lib/auth';
 import {
   verifyAndStoreCredential,
   walletPublicJwk,
@@ -92,6 +93,7 @@ export async function completeMobilePairing(
     completed.jwks_uri,
     'TicketProMobileCredential',
   );
+  await verifySessionAccount(completed.access_token, completed.account_wallet_address);
   return {
     accessToken: completed.access_token,
     accountWalletAddress: completed.account_wallet_address,
