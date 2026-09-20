@@ -5,8 +5,9 @@ type WalletContextType = {
   address: string | null;
   wallet: ethers.Wallet | null;
   accessToken: string | null;
-  displayName: string;
-  setSession: (wallet: ethers.Wallet | null, accessToken: string | null, accountAddress?: string, displayName?: string) => void;
+  signerAddress: string | null;
+  isLinkedAccount: boolean;
+  setSession: (wallet: ethers.Wallet | null, accessToken: string | null, accountAddress?: string) => void;
   logout: () => void;
 };
 
@@ -16,24 +17,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [wallet, setWalletState] = useState<ethers.Wallet | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [displayName, setDisplayName] = useState('TicketPro 회원');
 
-  const setSession = (newWallet: ethers.Wallet | null, newToken: string | null, accountAddress?: string, nextDisplayName?: string) => {
+  const setSession = (newWallet: ethers.Wallet | null, newToken: string | null, accountAddress?: string) => {
     setWalletState(newWallet);
     setAddress(accountAddress ?? newWallet?.address ?? null);
     setAccessToken(newToken);
-    setDisplayName(nextDisplayName || 'TicketPro 회원');
   };
 
   const logout = () => {
     setWalletState(null);
     setAddress(null);
     setAccessToken(null);
-    setDisplayName('TicketPro 회원');
   };
 
+  const signerAddress = wallet?.address ?? null;
+  const isLinkedAccount = Boolean(wallet && address && accessToken);
+
   return (
-    <WalletContext.Provider value={{ address, wallet, accessToken, displayName, setSession, logout }}>
+    <WalletContext.Provider value={{ address, wallet, accessToken, signerAddress, isLinkedAccount, setSession, logout }}>
       {children}
     </WalletContext.Provider>
   );

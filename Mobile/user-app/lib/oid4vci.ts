@@ -6,14 +6,14 @@ const STORAGE_KEY = 'ticketpro.oid4vci.credentials.v1';
 const LOCAL_WALLET_KEY = 'ticketpro.oid4vci.encrypted-wallet.v1';
 
 type JsonWebKeySet = {
-  keys?: Array<{
+  keys?: {
     kty?: string;
     crv?: string;
     x?: string;
     y?: string;
     kid?: string;
     alg?: string;
-  }>;
+  }[];
 };
 
 
