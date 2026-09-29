@@ -1,3 +1,9 @@
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+
 try:
     from .blockchain_backend import (
         AdminLoginRequest, Depends, EVENT_STATUSES, EventCreateRequest,
@@ -649,6 +655,26 @@ async def prepare_checkout_api(request: CheckoutPrepareRequest, session_wallet=D
                 if unavailable:
                     raise HTTPException(status_code=409, detail=f"이미 선점된 좌석입니다: {', '.join(unavailable)}")
 
+                # 좌석 상태가 잘못 available로 복구됐더라도 활성 예매 항목이 있으면
+                # 결제를 시작하기 전에 차단한다. 실패·취소 이력은 재예매를 막지 않는다.
+                cursor.execute(
+                    """
+                    SELECT s.seat_code
+                    FROM booking_items bi
+                    JOIN seats s ON s.id = bi.seat_id
+                    WHERE bi.seat_id = ANY(%s)
+                      AND bi.ticket_status NOT IN ('failed', 'cancelled')
+                    ORDER BY bi.seat_id
+                    """,
+                    (request.seat_ids,),
+                )
+                active_booking_seats = [row["seat_code"] for row in cursor.fetchall()]
+                if active_booking_seats:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"이미 유효한 티켓이 발급된 좌석입니다: {', '.join(active_booking_seats)}",
+                    )
+
                 total_amount = sum(int(row["price_amount"] or 0) for row in seat_rows)
                 cursor.execute(
                     """
@@ -1029,6 +1055,12 @@ async def buy_tickets_api(request: TicketRequest, session_wallet=Depends(require
         raise
     except Exception as e:
         error_msg = str(e)
+        logger.exception(
+            "티켓 구매 처리 실패: payment_id=%s booking_id=%s tx_hash=%s",
+            request.payment_id,
+            booking_id,
+            tx_hash_hex,
+        )
         if tx_submission_attempted and not chain_failure_confirmed:
             mark_booking_chain_pending(error_msg)
             raise HTTPException(status_code=503, detail=f"블록체인 제출 후 처리가 완료되지 않았습니다. 트랜잭션을 확인해주세요: {tx_hash_hex}")
