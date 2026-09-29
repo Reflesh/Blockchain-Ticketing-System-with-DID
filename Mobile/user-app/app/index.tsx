@@ -18,7 +18,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { TICKET_API_URL } from '@/constants/api';
+import { AUTH_API_URL, TICKET_API_URL } from '@/constants/api';
 import { CATEGORIES, mapEventResponse, type Concert, type EventResponse } from '@/constants/concerts';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -92,7 +92,7 @@ function ListCard({ item }: { item: Concert }) {
 
 // ─── Home screen ─────────────────────────────────────────
 export default function HomeScreen() {
-  const { address, logout } = useWallet();
+  const { address, accessToken, logout } = useWallet();
   const shortAddr = address ? `${address.slice(0, 6)}···${address.slice(-4)}` : null;
   const [concerts, setConcerts] = useState<Concert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,6 +163,20 @@ export default function HomeScreen() {
       Animated.timing(backdropOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
     ]).start(() => setDrawerOpen(false));
   }, [drawerX, backdropOpacity]);
+
+  const handleDrawerLogout = useCallback(async () => {
+    const token = accessToken;
+    await logout();
+    closeDrawer();
+    if (!token) return;
+    void fetch(`${AUTH_API_URL}/logout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: token }),
+    }).catch(() => {
+      // 기기의 로그인 정보는 이미 삭제되었으므로 서버 세션은 만료 시간에 자동 폐기된다.
+    });
+  }, [accessToken, closeDrawer, logout]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -386,7 +400,7 @@ export default function HomeScreen() {
                 <Text style={s.drawerLoginTitle}>TicketPro 회원</Text>
                 <Text style={[s.drawerLoginSub, { color: '#6B7280' }]}>{shortAddr}</Text>
               </View>
-              <TouchableOpacity onPress={() => { logout(); closeDrawer(); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <TouchableOpacity onPress={() => { void handleDrawerLogout(); }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 <Ionicons name="log-out-outline" size={20} color="#9CA3AF" />
               </TouchableOpacity>
             </View>
@@ -596,4 +610,3 @@ const s = StyleSheet.create({
   searchEmpty: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   searchEmptyText: { fontSize: 14, color: '#6B7280', textAlign: 'center' },
 });
-

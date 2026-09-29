@@ -34,7 +34,7 @@ function formatDate(seconds: number) {
 }
 
 export default function CredentialWalletScreen() {
-  const { wallet, setSession } = useWallet();
+  const { wallet, setSession, logout } = useWallet();
   const [permission, requestPermission] = useCameraPermissions();
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanLocked, setScanLocked] = useState(false);
@@ -77,18 +77,30 @@ export default function CredentialWalletScreen() {
         try {
           setStatus('Wallet 잠금을 해제했습니다. 서버 로그인을 진행하고 있습니다…');
           const session = await authenticateWallet(unlocked);
-          setSession(unlocked, session.accessToken, session.accountWalletAddress);
-          setStatus('Wallet 잠금 해제 및 서버 로그인을 완료했습니다.');
-          router.replace('/');
+          const autoLoginSaved = await setSession(
+            unlocked,
+            session.accessToken,
+            session.accountWalletAddress,
+          );
+          setStatus(autoLoginSaved
+            ? '로그인을 완료했습니다. 다음 앱 실행부터 자동으로 로그인됩니다.'
+            : '로그인은 완료했지만 자동 로그인 정보를 저장하지 못했습니다.');
+          Alert.alert(
+            'Wallet 로그인 완료',
+            autoLoginSaved
+              ? '자동 로그인이 활성화되었습니다. 로그아웃하지 않고 앱을 종료한 뒤 다시 열면 자동으로 로그인됩니다.'
+              : '서버 로그인은 완료했지만 자동 로그인 정보를 저장하지 못했습니다.',
+            [{ text: '확인', onPress: () => router.replace('/') }],
+          );
         } catch (loginError) {
-          setSession(unlocked, null);
+          await setSession(unlocked, null);
           const loginMessage = loginError instanceof Error
             ? loginError.message
             : '서버 로그인에 실패했습니다.';
           setStatus(`Wallet은 열었지만 서버 로그인에 실패했습니다: ${loginMessage}`);
         }
       } else {
-        setSession(unlocked, null);
+        await setSession(unlocked, null);
         setStatus('암호화된 로컬 Wallet을 생성했습니다. PC 웹 마이페이지의 QR로 연결해주세요.');
       }
     } catch (error) {
@@ -114,7 +126,7 @@ export default function CredentialWalletScreen() {
           style: 'destructive',
           onPress: async () => {
             await resetLocalWallet();
-            setSession(null, null);
+            await logout();
             setHasSavedWallet(false);
             setCredentials([]);
             setWalletPassword('');
@@ -163,13 +175,21 @@ export default function CredentialWalletScreen() {
     setStatus('PC 웹 계정과 모바일 Wallet을 안전하게 연결하고 있습니다…');
     try {
       const result = await completeMobilePairing(pairingValue, wallet);
-      setSession(wallet, result.accessToken, result.accountWalletAddress);
+      const autoLoginSaved = await setSession(
+        wallet,
+        result.accessToken,
+        result.accountWalletAddress,
+      );
       setPairingValue('');
       await refreshCredentials();
-      setStatus('모바일 VC 발급 및 서버 로그인을 완료했습니다.');
+      setStatus(autoLoginSaved
+        ? '모바일 VC 발급을 완료했습니다. 다음 앱 실행부터 자동으로 로그인됩니다.'
+        : '모바일 VC와 로그인은 완료했지만 자동 로그인 정보를 저장하지 못했습니다.');
       Alert.alert(
         '모바일 연결 완료',
-        `${formatDate(result.credential.expiresAt)}까지 이 Wallet으로 로그인할 수 있습니다.`,
+        autoLoginSaved
+          ? `${formatDate(result.credential.expiresAt)}까지 이 Wallet으로 자동 로그인할 수 있습니다.`
+          : '연결은 완료했지만 자동 로그인 정보는 저장되지 않았습니다.',
         [{ text: '확인', onPress: () => router.replace('/') }],
       );
     } catch (error) {
@@ -189,6 +209,9 @@ export default function CredentialWalletScreen() {
         style: 'destructive',
         onPress: async () => {
           await removeCredential(credential.id);
+          if (wallet && credential.subject.toLowerCase() === `did:pknu:${wallet.address}`.toLowerCase()) {
+            await logout();
+          }
           refreshCredentials();
         },
       },
@@ -434,4 +457,3 @@ const s = StyleSheet.create({
   scanFrame: { width: 270, height: 270, borderWidth: 3, borderColor: '#10B981', borderRadius: 24 },
   cameraGuide: { color: '#FFFFFF', fontSize: 12, textAlign: 'center', backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12 },
 });
-

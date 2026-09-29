@@ -142,7 +142,7 @@ export default function MyPageScreen() {
 
   const handleLogout = async () => {
     const token = accessToken;
-    logout();
+    await logout();
     router.replace('/login');
     if (!token) return;
     const controller = new AbortController();

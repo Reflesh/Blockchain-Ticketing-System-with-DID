@@ -917,7 +917,7 @@ function App() {
 
     setIsLoading(true)
     try {
-      const paymentId = `ticket_${crypto.randomUUID().replaceAll('-', '')}`;
+      const paymentId = `ticket_${ethers.hexlify(ethers.randomBytes(16)).slice(2)}`;
       const PORTONE_STORE_ID = import.meta.env.VITE_PORTONE_STORE_ID || 'store-xxxxxxxx';
       const PORTONE_CHANNEL_KEY = import.meta.env.VITE_PORTONE_CHANNEL_KEY || 'channel-key-d3965469-2d57-4114-9b5c-c7b5f45ff655';
 

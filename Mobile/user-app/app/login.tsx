@@ -53,7 +53,7 @@ export default function LoginScreen() {
     try {
       const wallet = (await ethers.Wallet.fromEncryptedJson(keystoreJson, password)) as ethers.Wallet;
       const session = await authenticateWallet(wallet);
-      setSession(wallet, session.accessToken, session.accountWalletAddress);
+      await setSession(wallet, session.accessToken, session.accountWalletAddress);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('로그인 성공', '로그인되었습니다.', [
         { text: '확인', onPress: () => router.replace('/') },

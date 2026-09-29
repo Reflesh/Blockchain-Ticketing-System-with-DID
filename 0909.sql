@@ -269,17 +269,19 @@ CREATE TABLE IF NOT EXISTS booking_items (
     transferred_at TIMESTAMPTZ,
     unit_price NUMERIC(12,2) NOT NULL DEFAULT 0,
     ticket_status VARCHAR(30) NOT NULL DEFAULT 'booked'
-        CHECK (ticket_status IN ('booked', 'mint_pending', 'minted', 'cancelled', 'failed')),
+        CHECK (ticket_status IN ('booked', 'mint_pending', 'minted', 'used', 'cancelled', 'failed')),
     token_id NUMERIC(78,0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (seat_id)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_booking_items_booking_id ON booking_items(booking_id);
 CREATE INDEX IF NOT EXISTS idx_booking_items_owner_wallet_address ON booking_items(owner_wallet_address);
 CREATE INDEX IF NOT EXISTS idx_booking_items_companion_wallet_address ON booking_items(companion_wallet_address);
 CREATE INDEX IF NOT EXISTS idx_booking_items_ticket_status ON booking_items(ticket_status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_booking_items_active_seat
+    ON booking_items(seat_id)
+    WHERE ticket_status NOT IN ('failed', 'cancelled');
 
 DROP TRIGGER IF EXISTS trg_booking_items_updated_at ON booking_items;
 CREATE TRIGGER trg_booking_items_updated_at
