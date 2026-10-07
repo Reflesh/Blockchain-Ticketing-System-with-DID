@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
-import { createContext, ReactNode, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
-import { authenticateWallet, verifySessionAccount } from '@/lib/auth';
+import { authenticateWallet, verifySessionAccount, WalletRequestError } from '@/lib/auth';
 import {
   clearSecureSession,
   loadSecureSession,
@@ -31,45 +31,77 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(true);
   const sessionGeneration = useRef(0);
-  const restoreStarted = useRef(false);
+  const restoreController = useRef<AbortController | null>(null);
+  const sessionStorageQueue = useRef<Promise<void>>(Promise.resolve());
+
+  const updateSessionStorage = useCallback((operation: () => Promise<boolean>) => {
+    const pending = sessionStorageQueue.current.then(operation);
+    sessionStorageQueue.current = pending.then(() => {}, () => {});
+    return pending;
+  }, []);
 
   useEffect(() => {
-    if (restoreStarted.current) return;
-    restoreStarted.current = true;
+    if (sessionGeneration.current !== 0) {
+      setIsRestoring(false);
+      return;
+    }
+    const controller = new AbortController();
+    restoreController.current = controller;
+    setIsRestoring(true);
     const generation = sessionGeneration.current;
     let active = true;
+    const isCurrent = () => active && !controller.signal.aborted && generation === sessionGeneration.current;
+    const timer = setTimeout(() => {
+      controller.abort();
+      if (active && generation === sessionGeneration.current) setIsRestoring(false);
+    }, 15000);
 
     const restore = async () => {
       try {
         const saved = await loadSecureSession();
-        if (!saved || !active || generation !== sessionGeneration.current) return;
+        if (!saved || !isCurrent()) return;
 
         let token = saved.accessToken;
         let accountWalletAddress = saved.accountWalletAddress;
         try {
-          await verifySessionAccount(token, accountWalletAddress);
-        } catch {
-          const refreshed = await authenticateWallet(saved.wallet);
+          await verifySessionAccount(token, accountWalletAddress, controller.signal);
+        } catch (error) {
+          if (!isCurrent()) return;
+          if (!(error instanceof WalletRequestError) || error.reason !== 'http' || error.status !== 401) throw error;
+          const refreshed = await authenticateWallet(saved.wallet, controller.signal);
+          if (!isCurrent()) return;
           token = refreshed.accessToken;
           accountWalletAddress = refreshed.accountWalletAddress;
-          await saveSecureSession(saved.wallet, token, accountWalletAddress);
+          await updateSessionStorage(async () => {
+            if (!isCurrent()) return false;
+            return saveSecureSession(saved.wallet, token, accountWalletAddress);
+          });
         }
 
-        if (!active || generation !== sessionGeneration.current) return;
+        if (!isCurrent()) return;
         setWalletState(saved.wallet);
         setAddress(accountWalletAddress);
         setAccessToken(token);
       } catch (error) {
         // 네트워크가 일시적으로 끊긴 경우에도 저장된 키를 지우지 않고 다음 실행에서 재시도한다.
-        console.warn('자동 로그인 세션을 복구하지 못했습니다.', error);
+        if (active && generation === sessionGeneration.current) {
+          console.warn('자동 로그인 세션을 복구하지 못했습니다.', error);
+        }
       } finally {
-        if (active) setIsRestoring(false);
+        clearTimeout(timer);
+        if (restoreController.current === controller) restoreController.current = null;
+        if (active && generation === sessionGeneration.current) setIsRestoring(false);
       }
     };
 
     void restore();
-    return () => { active = false; };
-  }, []);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      controller.abort();
+      if (restoreController.current === controller) restoreController.current = null;
+    };
+  }, [updateSessionStorage]);
 
   const setSession = async (
     newWallet: ethers.Wallet | null,
@@ -77,17 +109,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     accountAddress?: string,
   ): Promise<boolean> => {
     const generation = ++sessionGeneration.current;
+    restoreController.current?.abort();
+    restoreController.current = null;
+    setIsRestoring(false);
     setWalletState(newWallet);
     setAddress(accountAddress ?? newWallet?.address ?? null);
     setAccessToken(newToken);
     if (newWallet && newToken && accountAddress) {
       try {
-        const saved = await saveSecureSession(newWallet, newToken, accountAddress);
-        if (generation !== sessionGeneration.current) {
-          await clearSecureSession();
-          return false;
-        }
-        return saved;
+        const saved = await updateSessionStorage(async () => {
+          if (generation !== sessionGeneration.current) return false;
+          return saveSecureSession(newWallet, newToken, accountAddress);
+        });
+        return generation === sessionGeneration.current && saved;
       } catch (error) {
         console.warn('자동 로그인 정보를 저장하지 못했습니다.', error);
       }
@@ -96,12 +130,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    ++sessionGeneration.current;
+    const generation = ++sessionGeneration.current;
+    restoreController.current?.abort();
+    restoreController.current = null;
+    setIsRestoring(false);
     setWalletState(null);
     setAddress(null);
     setAccessToken(null);
     try {
-      await clearSecureSession();
+      await updateSessionStorage(async () => {
+        if (generation !== sessionGeneration.current) return false;
+        await clearSecureSession();
+        return true;
+      });
     } catch (error) {
       console.warn('자동 로그인 정보를 삭제하지 못했습니다.', error);
     }

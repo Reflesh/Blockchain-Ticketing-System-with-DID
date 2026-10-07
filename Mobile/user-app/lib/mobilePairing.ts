@@ -8,6 +8,43 @@ import {
   type StoredCredential,
 } from '@/lib/oid4vci';
 
+export function extractMobilePairingToken(scannedValue: string): string {
+  // React Native의 URL.hostname은 이 사용자 정의 URI를 처리하지 못할 수 있다.
+  const matched = /^ticketprouserapp:\/\/mobile-pairing\/?\?([^#\s]*)(?:#[^\s]*)?$/i.exec(scannedValue.trim());
+  if (!matched) {
+    throw new Error('PC 웹 마이페이지에서 발급한 모바일 연결 URI를 입력해주세요.');
+  }
+  const tokens: string[] = [];
+  try {
+    for (const parameter of matched[1].split('&')) {
+      const separator = parameter.indexOf('=');
+      const key = separator < 0 ? parameter : parameter.slice(0, separator);
+      if (decodeURIComponent(key.replace(/\+/g, ' ')) !== 'token') continue;
+      tokens.push(decodeURIComponent((separator < 0 ? '' : parameter.slice(separator + 1)).replace(/\+/g, ' ')));
+    }
+  } catch {
+    throw new Error('모바일 연결 URI의 인코딩이 올바르지 않습니다. URI 전체를 다시 복사해주세요.');
+  }
+  if (tokens.length !== 1 || !/^[A-Za-z0-9_-]{32,256}$/.test(tokens[0])) {
+    throw new Error('모바일 연결 토큰이 없거나 올바르지 않습니다. URI 전체를 복사해주세요.');
+  }
+  return tokens[0];
+}
+
+export function getMobilePairingInputError(value: string): string | null {
+  if (!value.trim()) return 'PC 웹 마이페이지의 모바일 연결 QR을 스캔하거나 URI를 입력해주세요.';
+  try {
+    extractMobilePairingToken(value);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : '모바일 연결 URI를 확인해주세요.';
+  }
+}
+
+export function canStartMobilePairing(value: string, busy: boolean): boolean {
+  return !busy && getMobilePairingInputError(value) === null;
+}
+
 type PairingResult = {
   accessToken: string;
   accountWalletAddress: string;
@@ -24,23 +61,6 @@ async function responseJson(response: Response): Promise<Record<string, any>> {
     throw new Error(String(message));
   }
   return body;
-}
-
-export function extractMobilePairingToken(scannedValue: string): string {
-  let parsed: URL;
-  try {
-    parsed = new URL(scannedValue.trim());
-  } catch {
-    throw new Error('모바일 연결 QR 데이터가 URL 형식이 아닙니다.');
-  }
-  if (parsed.protocol !== 'ticketprouserapp:' || parsed.hostname !== 'mobile-pairing') {
-    throw new Error('TicketPro 모바일 연결 QR이 아닙니다.');
-  }
-  const token = parsed.searchParams.get('token');
-  if (!token || token.length < 32) {
-    throw new Error('모바일 연결 토큰이 없습니다.');
-  }
-  return token;
 }
 
 export async function completeMobilePairing(

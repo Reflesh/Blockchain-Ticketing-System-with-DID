@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useWallet } from '@/context/WalletContext';
 import { authenticateWallet } from '@/lib/auth';
-import { completeMobilePairing } from '@/lib/mobilePairing';
+import { canStartMobilePairing, completeMobilePairing, getMobilePairingInputError } from '@/lib/mobilePairing';
 import {
   createLocalEncryptedWallet,
   hasLocalEncryptedWallet,
@@ -34,7 +34,7 @@ function formatDate(seconds: number) {
 }
 
 export default function CredentialWalletScreen() {
-  const { wallet, setSession, logout } = useWallet();
+  const { wallet, setSession, logout, isRestoring } = useWallet();
   const [permission, requestPermission] = useCameraPermissions();
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanLocked, setScanLocked] = useState(false);
@@ -46,6 +46,18 @@ export default function CredentialWalletScreen() {
   const [walletPassword, setWalletPassword] = useState('');
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletProgress, setWalletProgress] = useState<number | null>(null);
+  const walletFlowInFlight = useRef(false);
+  const pairingInputError = getMobilePairingInputError(pairingValue);
+  const canPair = canStartMobilePairing(pairingValue, issuing || walletBusy || isRestoring);
+  const pairingHint = isRestoring
+    ? '저장된 로그인 정보를 확인하고 있습니다…'
+    : walletBusy
+      ? '모바일 Wallet을 준비하고 있습니다…'
+      : issuing
+        ? '모바일 VC 발급과 로그인을 진행하고 있습니다…'
+        : pairingInputError ?? (wallet
+          ? '연결 URI를 확인했습니다. 모바일 VC 발급 및 로그인 버튼을 눌러주세요.'
+          : '연결 URI를 확인했습니다. 위에 Wallet 비밀번호를 입력한 뒤 연결 버튼을 누르면 Wallet을 준비합니다.');
 
   const refreshCredentials = useCallback(() => {
     loadCredentials().then(setCredentials).catch(() => setCredentials([]));
@@ -59,6 +71,8 @@ export default function CredentialWalletScreen() {
   );
 
   const handleLocalWallet = async () => {
+    if (walletFlowInFlight.current || issuing || isRestoring) return;
+    walletFlowInFlight.current = true;
     setWalletBusy(true);
     setWalletProgress(0);
     const operation = hasSavedWallet ? 'Wallet 잠금 해제' : 'Wallet 암호화';
@@ -110,6 +124,7 @@ export default function CredentialWalletScreen() {
         : rawMessage || 'Wallet을 준비하지 못했습니다.';
       Alert.alert('Wallet 오류', message);
     } finally {
+      walletFlowInFlight.current = false;
       setWalletBusy(false);
       setWalletProgress(null);
     }
@@ -152,8 +167,8 @@ export default function CredentialWalletScreen() {
   const handleScan = ({ data }: { data: string }) => {
     if (scanLocked) return;
     setScanLocked(true);
-    if (data.trim().startsWith('ticketprouserapp://mobile-pairing')) {
-      setPairingValue(data);
+    if (getMobilePairingInputError(data) === null) {
+      setPairingValue(data.trim());
       setStatus('PC 웹의 모바일 연결 QR을 읽었습니다. 연결 버튼을 눌러주세요.');
     } else {
       setStatus('TicketPro 모바일 연결 QR이 아닙니다.');
@@ -163,20 +178,44 @@ export default function CredentialWalletScreen() {
   };
 
   const handlePairing = async () => {
-    if (!wallet) {
-      Alert.alert('Wallet 준비 필요', '앱에서 Wallet을 생성하거나 저장된 Wallet의 잠금을 해제해주세요.');
+    if (walletFlowInFlight.current || issuing || walletBusy || isRestoring) return;
+    const inputError = getMobilePairingInputError(pairingValue);
+    if (inputError) {
+      Alert.alert('연결 URI 확인', inputError);
       return;
     }
-    if (!pairingValue.trim()) {
-      Alert.alert('연결 QR 필요', 'PC 웹 마이페이지의 모바일 연결 QR을 스캔하거나 URI를 입력해주세요.');
+    if (!wallet && !walletPassword) {
+      setStatus('위에 Wallet 비밀번호를 입력한 뒤 연결 버튼을 다시 눌러주세요.');
+      Alert.alert('Wallet 비밀번호 필요', '모바일 Wallet 생성 또는 잠금 해제에 사용할 비밀번호를 입력해주세요. 새 비밀번호는 8자 이상이어야 합니다.');
       return;
     }
+    walletFlowInFlight.current = true;
     setIssuing(true);
     setStatus('PC 웹 계정과 모바일 Wallet을 안전하게 연결하고 있습니다…');
     try {
-      const result = await completeMobilePairing(pairingValue, wallet);
+      let pairingWallet = wallet;
+      if (!pairingWallet) {
+        setWalletBusy(true);
+        setWalletProgress(0);
+        const saved = await hasLocalEncryptedWallet();
+        const onProgress = (progress: number) => {
+          const percent = Math.round(progress * 100);
+          setWalletProgress(percent);
+          setStatus(`${saved ? 'Wallet 잠금 해제' : 'Wallet 암호화'} 중… ${percent}%`);
+        };
+        pairingWallet = saved
+          ? await unlockLocalEncryptedWallet(walletPassword, onProgress)
+          : await createLocalEncryptedWallet(walletPassword, onProgress);
+        setWalletPassword('');
+        setHasSavedWallet(true);
+        await setSession(pairingWallet, null);
+        setWalletBusy(false);
+        setWalletProgress(null);
+        setStatus('Wallet을 준비했습니다. PC 웹 계정과 연결하고 있습니다…');
+      }
+      const result = await completeMobilePairing(pairingValue.trim(), pairingWallet);
       const autoLoginSaved = await setSession(
-        wallet,
+        pairingWallet,
         result.accessToken,
         result.accountWalletAddress,
       );
@@ -193,11 +232,17 @@ export default function CredentialWalletScreen() {
         [{ text: '확인', onPress: () => router.replace('/') }],
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : '모바일 연결에 실패했습니다.';
+      const rawMessage = error instanceof Error ? error.message : '';
+      const message = /incorrect password/i.test(rawMessage)
+        ? 'Wallet 비밀번호가 올바르지 않습니다.'
+        : rawMessage || '모바일 연결에 실패했습니다.';
       setStatus(`모바일 연결 실패: ${message}`);
       Alert.alert('모바일 연결 실패', message);
     } finally {
+      walletFlowInFlight.current = false;
       setIssuing(false);
+      setWalletBusy(false);
+      setWalletProgress(null);
     }
   };
 
@@ -324,7 +369,7 @@ export default function CredentialWalletScreen() {
             <TextInput
               style={s.offerInput}
               value={pairingValue}
-              onChangeText={setPairingValue}
+              onChangeText={(value) => { setPairingValue(value); setStatus(null); }}
               placeholder="ticketprouserapp://mobile-pairing?token=…"
               placeholderTextColor="#4B5563"
               multiline
@@ -332,9 +377,9 @@ export default function CredentialWalletScreen() {
               autoCorrect={false}
             />
             <TouchableOpacity
-              style={[s.issueButton, (!wallet || issuing || !pairingValue.trim()) && s.disabled]}
+              style={[s.issueButton, !canPair && s.disabled]}
               onPress={handlePairing}
-              disabled={!wallet || issuing || !pairingValue.trim()}
+              disabled={!canPair}
             >
               {issuing ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -345,6 +390,7 @@ export default function CredentialWalletScreen() {
                 </>
               )}
             </TouchableOpacity>
+            <Text style={s.status}>{pairingHint}</Text>
             <Text style={s.securityNote}>
               기존 PC 키나 VC는 전송하지 않고, 이 기기에서 새로 만든 Wallet에 모바일용 VC를 발급합니다.
             </Text>

@@ -38,11 +38,48 @@ function formatPrice(amount) {
   return numericAmount === 0 ? '무료' : `${numericAmount.toLocaleString()}원`
 }
 
-async function copyForDemo(value, label) {
+async function copyText(value) {
+  if (typeof value !== 'string' || !value || typeof window === 'undefined') return false
+
+  const clipboard = window.navigator?.clipboard
+  if (window.isSecureContext && typeof clipboard?.writeText === 'function') {
+    try {
+      await clipboard.writeText(value)
+      return true
+    } catch {
+      // 클립보드 권한이 거부되면 대체 복사를 시도한다.
+    }
+  }
+
+  const document = window.document
+  if (!document?.body) return false
+  const previousFocus = document.activeElement
+  let textarea
   try {
-    await navigator.clipboard.writeText(value)
-    alert(`${label}을(를) 복사했습니다.`)
+    textarea = document.createElement('textarea')
+    textarea.value = value
+    textarea.readOnly = true
+    textarea.style.position = 'fixed'
+    textarea.style.left = '0'
+    textarea.style.top = '0'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus({ preventScroll: true })
+    textarea.select()
+    textarea.setSelectionRange(0, value.length)
+    return typeof document.execCommand === 'function' && document.execCommand('copy') === true
   } catch {
+    return false
+  } finally {
+    try { textarea?.remove() } catch { /* 정리 실패가 복사 결과를 바꾸지 않도록 한다. */ }
+    try { previousFocus?.focus?.({ preventScroll: true }) } catch { /* 포커스가 사라진 경우에도 결과를 반환한다. */ }
+  }
+}
+
+async function copyForDemo(value, label) {
+  if (await copyText(value)) {
+    alert(`${label}을(를) 복사했습니다.`)
+  } else {
     window.prompt(`${label}을(를) 직접 복사하세요.`, value)
   }
 }
@@ -382,11 +419,10 @@ function App() {
 
   const handleCopyPairingUri = async () => {
     if (!mobilePairing?.pairing_uri) return
-    try {
-      await navigator.clipboard.writeText(mobilePairing.pairing_uri)
+    if (await copyText(mobilePairing.pairing_uri)) {
       alert('모바일 연결 URI를 복사했습니다. 에뮬레이터 앱의 URI 입력창에 붙여넣으세요.')
-    } catch {
-      alert('클립보드 복사를 사용할 수 없습니다. URI를 직접 선택해 복사해주세요.')
+    } else {
+      window.prompt('자동 복사가 차단되었습니다. 아래 모바일 연결 URI를 직접 복사해주세요.', mobilePairing.pairing_uri)
     }
   }
 
@@ -1035,7 +1071,7 @@ function App() {
 
     const targetNickname = companionUsername.trim()
     if (!targetNickname) {
-      alert('티켓을 받을 동반인의 가입 닉네임을 정확히 입력해주세요.')
+      alert('티켓을 받을 동반인의 닉네임, 등록된 이름 또는 지갑 주소를 입력해주세요.')
       return
     }
 
@@ -1914,7 +1950,7 @@ function App() {
                           <p>이 QR은 1회만 사용할 수 있고 <b>{mobilePairingSeconds}초</b> 후 만료됩니다.</p>
                           <p>Android 에뮬레이터에서는 아래 URI를 복사해 앱에 직접 입력하세요.</p>
                           <div className="mobile-pairing-uri-row">
-                            <input value={mobilePairing.pairing_uri || ''} readOnly aria-label="모바일 연결 URI" />
+                            <input value={mobilePairing.pairing_uri || ''} readOnly onFocus={(e) => e.target.select()} aria-label="모바일 연결 URI" />
                             <button type="button" onClick={handleCopyPairingUri}>복사</button>
                           </div>
                         </div>
@@ -2136,7 +2172,7 @@ function App() {
               <h3 className="transfer-modal-title">동반인 티켓 양도</h3>
               <p className="transfer-modal-sub">{transferModalBooking.name}</p>
               <p className="transfer-modal-desc">
-                양도할 좌석과 티켓을 받을 동반인의 가입 닉네임을 입력해주세요.
+                양도할 좌석과 티켓을 받을 동반인의 닉네임, 등록된 이름 또는 지갑 주소를 입력해주세요.
               </p>
               <div className="transfer-item-list">
                 {(transferModalBooking.items || [])
@@ -2168,7 +2204,7 @@ function App() {
                 type="text"
                 value={companionUsername}
                 onChange={(e) => setCompanionUsername(e.target.value)}
-                placeholder="동반인 가입 닉네임"
+                placeholder="동반인 닉네임, 등록된 이름 또는 지갑 주소"
                 disabled={isTransferring}
               />
               <div className="transfer-modal-actions">

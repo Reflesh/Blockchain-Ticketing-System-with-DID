@@ -42,6 +42,49 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
+def sync_did_user(cursor, wallet_address, verified_email):
+    """인증된 이메일로 기본 닉네임을 만들고 기존 사용자의 닉네임은 보존한다."""
+    email = verified_email.strip().lower() if isinstance(verified_email, str) else ""
+    cursor.execute(
+        "SELECT wallet_address, username FROM users WHERE LOWER(wallet_address) = LOWER(%s)",
+        (wallet_address,),
+    )
+    existing = cursor.fetchone()
+    if existing:
+        wallet_address = existing["wallet_address"]
+
+    # 이메일 앞부분이 이미 사용 중이면 전체 이메일 또는 지갑 주소를 사용한다.
+    username = None
+    for candidate in ((existing or {}).get("username"), email.split("@", 1)[0], email, wallet_address):
+        if candidate is None:
+            continue
+        candidate = candidate.strip()
+        if not candidate or len(candidate) > 100:
+            continue
+        cursor.execute(
+            "SELECT id FROM users WHERE username = %s AND wallet_address <> %s",
+            (candidate, wallet_address),
+        )
+        if not cursor.fetchone():
+            username = candidate
+            break
+    if username is None:
+        raise ValueError("사용 가능한 기본 닉네임을 만들 수 없습니다.")
+
+    cursor.execute(
+        """
+        INSERT INTO users (username, wallet_address, auth_provider, verification_status)
+        VALUES (%s, %s, 'did_keystore', 'verified')
+        ON CONFLICT (wallet_address) DO UPDATE SET
+            username = COALESCE(NULLIF(TRIM(users.username), ''), EXCLUDED.username),
+            auth_provider = EXCLUDED.auth_provider,
+            verification_status = EXCLUDED.verification_status,
+            status = 'active'
+        """,
+        (username, wallet_address),
+    )
+
+
 def env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name, str(default)).strip().lower()
     if value not in {"true", "false", "1", "0"}:
@@ -547,7 +590,7 @@ def init_db():
                               AND column_name = required.column_name
                         )
                         """,
-                        (["wallet_address", "auth_provider", "verification_status", "status"],),
+                        (["username", "wallet_address", "auth_provider", "verification_status", "status"],),
                     )
                     missing_columns = [row["column_name"] for row in cur.fetchall()]
                     if missing_columns:
@@ -1866,7 +1909,7 @@ async def oid4vci_credential(
                 )
 
             cur.execute(
-                "SELECT wallet_address FROM issued_vcs WHERE ci_hash = %s",
+                "SELECT wallet_address FROM issued_vcs WHERE ci_hash = %s FOR UPDATE",
                 (token_record["ci_hash"],),
             )
             previous = cur.fetchone()
@@ -1921,17 +1964,7 @@ async def oid4vci_credential(
                 ),
             )
             if SYNC_MAIN_USERS:
-                cur.execute(
-                    """
-                    INSERT INTO users (wallet_address, auth_provider, verification_status)
-                    VALUES (%s, 'did_keystore', 'verified')
-                    ON CONFLICT (wallet_address) DO UPDATE SET
-                        auth_provider = EXCLUDED.auth_provider,
-                        verification_status = EXCLUDED.verification_status,
-                        status = 'active'
-                    """,
-                    (holder_address,),
-                )
+                sync_did_user(cur, holder_address, token_record["email"])
             cur.execute(
                 """
                 UPDATE oid4vci_access_tokens
@@ -2162,17 +2195,7 @@ async def verify_login_challenge(request: LoginVerifyRequest):
 
             if not credential_failure:
                 if SYNC_MAIN_USERS and auth_provider == "did_keystore":
-                    cur.execute(
-                        """
-                        INSERT INTO users (wallet_address, auth_provider, verification_status)
-                        VALUES (%s, 'did_keystore', 'verified')
-                        ON CONFLICT (wallet_address) DO UPDATE SET
-                            auth_provider = EXCLUDED.auth_provider,
-                            verification_status = EXCLUDED.verification_status,
-                            status = 'active'
-                        """,
-                        (request.wallet_address,),
-                    )
+                    sync_did_user(cur, request.wallet_address, email)
 
                 token = secrets.token_urlsafe(32)
                 session_expires_at = now + LOGIN_SESSION_TTL
@@ -2395,7 +2418,7 @@ async def verify_email_auth(request: VerifyRequest, background_tasks: Background
                 if cur.fetchone():
                     raise HTTPException(status_code=400, detail="다른 계정에서 이미 사용 중인 지갑 주소입니다.")
                 
-                cur.execute("SELECT wallet_address FROM issued_vcs WHERE ci_hash = %s", (ci_hash,))
+                cur.execute("SELECT wallet_address FROM issued_vcs WHERE ci_hash = %s FOR UPDATE", (ci_hash,))
                 old_record = cur.fetchone()
                 
                 if old_record and old_record['wallet_address'].lower() != request.wallet_address.lower():
@@ -2435,17 +2458,7 @@ async def verify_email_auth(request: VerifyRequest, background_tasks: Background
                         expires_at     = EXCLUDED.expires_at
                 """, (ci_hash, email, request.wallet_address, issued_str, expires_str))
                 if SYNC_MAIN_USERS:
-                    cur.execute(
-                        """
-                        INSERT INTO users (wallet_address, auth_provider, verification_status)
-                        VALUES (%s, 'did_keystore', 'verified')
-                        ON CONFLICT (wallet_address) DO UPDATE SET
-                            auth_provider = EXCLUDED.auth_provider,
-                            verification_status = EXCLUDED.verification_status,
-                            status = 'active'
-                        """,
-                        (request.wallet_address,)
-                    )
+                    sync_did_user(cur, request.wallet_address, email)
             conn.commit()
             
         delete_session(email)

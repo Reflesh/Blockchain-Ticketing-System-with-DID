@@ -319,7 +319,7 @@ async def user_bookings_api(wallet_address: str, session_wallet=Depends(require_
                     GROUP BY b.id, e.id, s.id, bt.tx_hash
                     ORDER BY b.created_at DESC
                     """,
-                    (wallet_address, wallet_address, wallet_address, wallet_address) # %s가 4개 들어가므로 4번 매핑
+                    (wallet_address, wallet_address, wallet_address, wallet_address)
                 )
                 rows = cursor.fetchall()
 
@@ -1093,6 +1093,8 @@ async def load_transfer_context(request):
             try:
                 comp_row = resolve_user(cursor, request.companion_username)
             except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
                 raise HTTPException(status_code=404, detail=f"양도할 대상 '{request.companion_username}' 을(를) 찾을 수 없습니다.") from exc
             if not comp_row or not comp_row.get("wallet_address"):
                 raise HTTPException(status_code=404, detail="양도할 대상의 지갑 정보를 찾을 수 없습니다.")

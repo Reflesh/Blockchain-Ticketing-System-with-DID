@@ -522,32 +522,25 @@ def make_booking_no():
     return f"BK-{uuid.uuid4().hex[:12].upper()}"
 
 def resolve_user(cursor, username_or_wallet):
+    username_or_wallet = username_or_wallet.strip()
+    if not username_or_wallet:
+        raise HTTPException(status_code=400, detail="양도받을 사용자의 닉네임, 이름 또는 지갑 주소를 입력해주세요.")
     cursor.execute(
         """
         SELECT id, username, wallet_address
         FROM users
-        WHERE username = %s OR wallet_address = %s
+        WHERE status = 'active'
+          AND (TRIM(username) = %s OR TRIM(real_name) = %s
+               OR LOWER(wallet_address) = LOWER(%s))
+        LIMIT 2
         """,
-        (username_or_wallet, username_or_wallet)
+        (username_or_wallet, username_or_wallet, username_or_wallet)
     )
-    result = cursor.fetchone()
-    if result:
-        return result
-
-    if web3.is_address(username_or_wallet):
-        cursor.execute(
-            """
-            INSERT INTO users (wallet_address, auth_provider, verification_status)
-            VALUES (%s, 'did_keystore', 'verified')
-            ON CONFLICT (wallet_address) DO UPDATE SET
-                wallet_address = EXCLUDED.wallet_address,
-                auth_provider = EXCLUDED.auth_provider,
-                verification_status = EXCLUDED.verification_status
-            RETURNING id, username, wallet_address
-            """,
-            (username_or_wallet,)
-        )
-        return cursor.fetchone()
+    results = cursor.fetchall()
+    if len(results) > 1:
+        raise HTTPException(status_code=409, detail="같은 이름의 사용자가 여러 명입니다. 수령인의 지갑 주소를 입력해주세요.")
+    if results:
+        return results[0]
 
     raise HTTPException(status_code=404, detail="가입되지 않은 사용자입니다. 먼저 회원가입을 진행해주세요.")
 
