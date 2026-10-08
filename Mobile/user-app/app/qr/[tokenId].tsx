@@ -157,7 +157,8 @@ export default function QRScreen() {
           booking.payment_status === 'paid' &&
           booking.blockchain_status === 'confirmed' &&
           booking.items.some((item) => (
-            item.token_id === canonicalTokenId && item.ticket_status === 'minted'
+            item.token_id === canonicalTokenId && item.ticket_status === 'minted' &&
+            item.owner_wallet_address?.toLowerCase() === address.toLowerCase()
           ))
         ));
         if (!eligible) {

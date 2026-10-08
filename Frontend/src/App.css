@@ -288,6 +288,9 @@ body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smooth
   background: #f8fafc; color: #94a3b8; border-color: #e2e8f0;
   text-decoration: line-through; text-decoration-color: #cbd5e1;
 }
+.seat-chip.received {
+  background: #ecfdf5; color: #047857; border-color: #a7f3d0;
+}
 
 /* 양도하기 버튼 (history-info 내부, 보조 액션) */
 .transfer-btn {

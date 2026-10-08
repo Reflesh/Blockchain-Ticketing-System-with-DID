@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useWallet } from '@/context/WalletContext';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator, Alert, FlatList, RefreshControl,
   StyleSheet, Text, TouchableOpacity, View,
@@ -10,9 +10,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AUTH_API_URL } from '@/constants/api';
+import { mapEventResponse, type Concert } from '@/constants/concerts';
 import {
   getBookings,
   getUserProfile,
+  getWishlist,
   type Booking,
   type BookingItem,
 } from '@/services/ticketApi';
@@ -20,6 +22,16 @@ import {
 function shortAddr(addr: string | null) {
   if (!addr) return '';
   return `${addr.slice(0, 6)}···${addr.slice(-4)}`;
+}
+
+function ownsTicket(item: BookingItem, accountAddress: string | null): boolean {
+  return Boolean(accountAddress && item.owner_wallet_address &&
+    item.owner_wallet_address.toLowerCase() === accountAddress.toLowerCase());
+}
+
+function getTransferLabel(item: BookingItem, accountAddress: string | null): string {
+  if (item.is_transferred) return ownsTicket(item, accountAddress) ? '양도받은 티켓' : '양도 완료';
+  return '';
 }
 
 type TicketState = 'pending' | 'minted' | 'used' | 'failed' | 'unavailable';
@@ -45,8 +57,8 @@ const STATE_UI: Record<TicketState, { label: string; color: string }> = {
   unavailable: { label: '사용 불가', color: '#6B7280' },
 };
 
-function TicketCard({ booking, onSeatPress }: { booking: Booking; onSeatPress: (b: Booking, s: BookingItem) => void }) {
-  const issuedCount = booking.items.filter(item => ['minted', 'used'].includes(getTicketState(booking, item))).length;
+function TicketCard({ booking, accountAddress, onSeatPress }: { booking: Booking; accountAddress: string | null; onSeatPress: (b: Booking, s: BookingItem) => void }) {
+  const issuedCount = booking.items.filter(item => ownsTicket(item, accountAddress) && ['minted', 'used'].includes(getTicketState(booking, item))).length;
   return (
     <View style={tc.card}>
       <View style={[tc.header, { backgroundColor: booking.poster_color }]}>
@@ -73,25 +85,31 @@ function TicketCard({ booking, onSeatPress }: { booking: Booking; onSeatPress: (
         {booking.items.map((seat, idx) => {
           const state = getTicketState(booking, seat);
           const stateUi = STATE_UI[state];
+          const isOwner = ownsTicket(seat, accountAddress);
+          const transferLabel = getTransferLabel(seat, accountAddress);
           return (
             <TouchableOpacity
               key={seat.booking_item_id}
-              style={[tc.seatRow, idx < booking.items.length - 1 && tc.seatRowBorder, state !== 'minted' && tc.seatRowDisabled]}
+              style={[tc.seatRow, idx < booking.items.length - 1 && tc.seatRowBorder, (!isOwner || state !== 'minted') && tc.seatRowDisabled]}
+              disabled={!isOwner}
               onPress={() => onSeatPress(booking, seat)}
               activeOpacity={0.7}
             >
               <View style={tc.seatLeft}>
                 <View style={[tc.statusDot, { backgroundColor: stateUi.color }]} />
-                <Text style={tc.seatCode}>{seat.seat_code}</Text>
+                <View style={tc.seatInfo}>
+                  <Text style={tc.seatCode}>{seat.seat_code}</Text>
+                  {transferLabel !== '' && <Text style={tc.transferLabel}>{transferLabel}</Text>}
+                </View>
               </View>
-              {state === 'minted' ? (
+              {isOwner && state === 'minted' ? (
                 <View style={tc.qrBtn}>
                   <Ionicons name="qr-code-outline" size={13} color="#E11D48" />
                   <Text style={tc.qrBtnText}>{stateUi.label}</Text>
                 </View>
               ) : (
                 <View style={[tc.stateBadge, { borderColor: stateUi.color + '55' }]}>
-                  <Text style={[tc.stateText, { color: stateUi.color }]}>{stateUi.label}</Text>
+                  <Text style={[tc.stateText, { color: stateUi.color }]}>{isOwner ? stateUi.label : seat.is_transferred ? '양도 완료' : '사용 불가'}</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -110,8 +128,13 @@ export default function MyPageScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [displayName, setDisplayName] = useState('TicketPro 회원');
+  const [activeTab, setActiveTab] = useState<'tickets' | 'wishlist'>('tickets');
+  const [wishlist, setWishlist] = useState<Concert[]>([]);
+  const [wishlistLoading, setWishlistLoading] = useState(true);
+  const [wishlistRefreshing, setWishlistRefreshing] = useState(false);
+  const [wishlistError, setWishlistError] = useState('');
 
-  const loadBookings = useCallback(async () => {
+  const loadBookings = useCallback(async (signal?: AbortSignal) => {
     setLoadError('');
     if (!address || !accessToken) {
       setBookings([]);
@@ -122,23 +145,53 @@ export default function MyPageScreen() {
     }
     try {
       const [nextBookings, profile] = await Promise.all([
-        getBookings(address, accessToken),
-        getUserProfile(address, accessToken),
+        getBookings(address, accessToken, signal),
+        getUserProfile(address, accessToken, signal),
       ]);
+      if (signal?.aborted) return;
       if (profile.wallet_address.toLowerCase() !== address.toLowerCase()) {
         throw new Error('로그인 계정과 서버 프로필이 일치하지 않습니다.');
       }
       setDisplayName(profile.display_name || 'TicketPro 회원');
       setBookings(nextBookings);
     } catch (error) {
+      if (signal?.aborted) return;
       setBookings([]);
       setLoadError(error instanceof Error ? error.message : '예매 내역을 불러오지 못했습니다.');
     } finally {
-      setLoading(false); setRefreshing(false);
+      if (!signal?.aborted) { setLoading(false); setRefreshing(false); }
     }
   }, [address, accessToken]);
 
-  useEffect(() => { loadBookings(); }, [loadBookings]);
+  const loadWishlist = useCallback(async (signal?: AbortSignal) => {
+    setWishlistError('');
+    if (!address || !accessToken) {
+      setWishlist([]);
+      setWishlistError('로그인 정보가 없습니다. 다시 로그인해주세요.');
+      setWishlistLoading(false);
+      setWishlistRefreshing(false);
+      return;
+    }
+    try {
+      const events = await getWishlist(address, accessToken, signal);
+      if (!signal?.aborted) setWishlist(events.map(mapEventResponse));
+    } catch (error) {
+      if (signal?.aborted) return;
+      setWishlist([]);
+      setWishlistError(error instanceof Error ? error.message : '찜 목록을 불러오지 못했습니다.');
+    } finally {
+      if (!signal?.aborted) { setWishlistLoading(false); setWishlistRefreshing(false); }
+    }
+  }, [address, accessToken]);
+
+  useFocusEffect(useCallback(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setWishlistLoading(true);
+    void loadBookings(controller.signal);
+    void loadWishlist(controller.signal);
+    return () => controller.abort();
+  }, [loadBookings, loadWishlist]));
 
   const handleLogout = async () => {
     const token = accessToken;
@@ -162,6 +215,10 @@ export default function MyPageScreen() {
     }
   };
   const handleSeatPress = (booking: Booking, seat: BookingItem) => {
+    if (!ownsTicket(seat, address)) {
+      Alert.alert(seat.is_transferred ? '양도 완료' : '사용 불가', '현재 본인이 소유한 티켓만 QR을 만들 수 있습니다.');
+      return;
+    }
     const state = getTicketState(booking, seat);
     if (state !== 'minted' || !seat.token_id) {
       const messages: Record<TicketState, string> = {
@@ -178,10 +235,8 @@ export default function MyPageScreen() {
     router.push({ pathname: '/qr/[tokenId]', params: { tokenId: String(seat.token_id), title: booking.title, venue: booking.venue, date: booking.display_time_text, seatCode: seat.seat_code, posterColor: booking.poster_color.replace('#', '') } });
   };
 
-  if (loading) return <View style={s.loadingBox}><ActivityIndicator size="large" color="#E11D48" /></View>;
-
   const totalMinted = bookings.reduce(
-    (sum, booking) => sum + booking.items.filter(item => ['minted', 'used'].includes(getTicketState(booking, item))).length,
+    (sum, booking) => sum + booking.items.filter(item => ownsTicket(item, address) && ['minted', 'used'].includes(getTicketState(booking, item))).length,
     0,
   );
 
@@ -212,7 +267,20 @@ export default function MyPageScreen() {
         <View style={s.statItem}><Text style={[s.statValue, { color: '#10B981', fontSize: 13 }]}>On-chain</Text><Text style={s.statLabel}>저장 방식</Text></View>
       </View>
 
+      <View style={s.tabs}>
+        <TouchableOpacity style={[s.tab, activeTab === 'tickets' && s.activeTab]} onPress={() => setActiveTab('tickets')} accessibilityRole="tab" accessibilityState={{ selected: activeTab === 'tickets' }}>
+          <Text style={[s.tabText, activeTab === 'tickets' && s.activeTabText]}>내 티켓</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.tab, activeTab === 'wishlist' && s.activeTab]} onPress={() => setActiveTab('wishlist')} accessibilityRole="tab" accessibilityState={{ selected: activeTab === 'wishlist' }}>
+          <Text style={[s.tabText, activeTab === 'wishlist' && s.activeTabText]}>찜 목록</Text>
+        </TouchableOpacity>
+      </View>
+
+      {(activeTab === 'tickets' ? loading : wishlistLoading) ? (
+        <View style={s.loadingBox}><ActivityIndicator size="large" color="#E11D48" /></View>
+      ) : activeTab === 'tickets' ? (
       <FlatList
+        key="tickets"
         data={bookings}
         keyExtractor={item => String(item.id)}
         contentContainerStyle={s.list}
@@ -235,8 +303,40 @@ export default function MyPageScreen() {
             )}
           </View>
         }
-        renderItem={({ item }) => <TicketCard booking={item} onSeatPress={handleSeatPress} />}
+        renderItem={({ item }) => <TicketCard booking={item} accountAddress={address} onSeatPress={handleSeatPress} />}
       />
+      ) : (
+        <FlatList
+          key="wishlist"
+          data={wishlist}
+          keyExtractor={item => item.id}
+          contentContainerStyle={s.list}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={wishlistRefreshing} onRefresh={() => { setWishlistRefreshing(true); void loadWishlist(); }} tintColor="#E11D48" />}
+          ListHeaderComponent={<Text style={s.sectionLabel}>찜한 공연</Text>}
+          ListEmptyComponent={
+            <View style={s.empty}>
+              <View style={s.emptyIcon}><Ionicons name={wishlistError ? 'cloud-offline-outline' : 'heart-outline'} size={38} color="#2D2D40" /></View>
+              <Text style={s.emptyTitle}>{wishlistError ? '찜 목록을 불러오지 못했습니다' : '아직 찜한 공연이 없어요'}</Text>
+              <Text style={s.emptySub}>{wishlistError || '공연 상세 화면에서 하트를 누르면 여기에 표시됩니다.'}</Text>
+              <TouchableOpacity style={s.retryBtn} onPress={() => wishlistError ? void loadWishlist() : router.push('/')}>
+                <Text style={s.retryBtnText}>{wishlistError ? '다시 시도' : '공연 보러 가기'}</Text>
+              </TouchableOpacity>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <TouchableOpacity style={tc.card} onPress={() => router.push({ pathname: '/concert/[concertId]', params: { concertId: item.id } })} accessibilityLabel={`${item.title} 상세 보기`}>
+              <View style={[tc.header, { backgroundColor: item.posterColor }]}>
+                <View style={tc.headerTop}><Text style={tc.categoryText}>{item.genre}</Text><Ionicons name="heart" size={18} color="#E11D48" /></View>
+                <Text style={tc.eventTitle}>{item.title}</Text>
+                <Text style={tc.metaText}>{item.venue}</Text>
+                <Text style={tc.metaText}>{item.displayTime}</Text>
+              </View>
+              <View style={s.wishlistFooter}><Text style={tc.seatCode}>{item.price}</Text><Text style={tc.qrBtnText}>상세 보기 ›</Text></View>
+            </TouchableOpacity>
+          )}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -258,6 +358,12 @@ const s = StyleSheet.create({
   statValue: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
   statLabel: { fontSize: 10, color: '#9CA3AF', marginTop: 4, letterSpacing: 0.2 },
   statDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.06)' },
+  tabs: { flexDirection: 'row', marginHorizontal: 20, marginTop: 12, gap: 8 },
+  tab: { flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: '#13131F' },
+  activeTab: { backgroundColor: 'rgba(225,29,72,0.15)' },
+  tabText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
+  activeTabText: { color: '#E11D48' },
+  wishlistFooter: { flexDirection: 'row', justifyContent: 'space-between', padding: 18 },
   list: { padding: 20, gap: 16, paddingBottom: 48 },
   sectionLabel: { fontSize: 12, fontWeight: '600', color: '#9CA3AF', letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' },
   empty: { alignItems: 'center', paddingVertical: 80, gap: 12 },
@@ -288,6 +394,8 @@ const tc = StyleSheet.create({
   seatRowBorder: { borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   seatRowDisabled: { opacity: 0.45 },
   seatLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  seatInfo: { gap: 4 },
+  transferLabel: { fontSize: 10, color: '#9CA3AF' },
   statusDot: { width: 7, height: 7, borderRadius: 3.5 },
   seatCode: { fontSize: 14, color: '#FFFFFF', fontWeight: '500' },
   stateBadge: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 7, borderWidth: 1, backgroundColor: 'rgba(255,255,255,0.025)' },

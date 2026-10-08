@@ -84,6 +84,13 @@ async function copyForDemo(value, label) {
   }
 }
 
+function getTicketTransferLabel(item, currentUserWallet) {
+  const isOwner = Boolean(currentUserWallet && item?.owner_wallet_address &&
+    item.owner_wallet_address.toLowerCase() === currentUserWallet.toLowerCase())
+  if (item?.is_transferred) return isOwner ? '양도받은 티켓' : '양도 완료'
+  return ''
+}
+
 // 🎟️ 양도 가능 여부: 발행 완료 + 미양도 + 본인 소유인 티켓만 양도 가능
 function isTransferable(item, currentUserWallet) {
   return (
@@ -2022,19 +2029,15 @@ function App() {
                                       key={item.booking_item_id || item.seat_code}
                                       className={
                                         'seat-chip' +
-                                        (item.is_transferred ? ' transferred' : '') +
+                                        (item.is_transferred ? getTicketTransferLabel(item, currentUser.walletAddress) === '양도받은 티켓' ? ' received' : ' transferred' : '') +
                                         (isTransferable(item, currentUser.walletAddress) ? ' transferable' : '')
                                       }
                                       title={
-                                        item.is_transferred
-                                          ? '동반인에게 양도 완료'
-                                          : isTransferable(item, currentUser.walletAddress)
-                                          ? `동반인 양도 가능`
-                                          : undefined
+                                        getTicketTransferLabel(item, currentUser.walletAddress) || undefined
                                       }
                                     >
                                       {item.seat_code}
-                                      {item.is_transferred && ' ↗ (양도완료)'}
+                                      {getTicketTransferLabel(item, currentUser.walletAddress) && ` (${getTicketTransferLabel(item, currentUser.walletAddress)})`}
                                       {isTransferable(item, currentUser.walletAddress) && ' 🎁 (양도 가능)'}
                                     </span>
                                   ))
