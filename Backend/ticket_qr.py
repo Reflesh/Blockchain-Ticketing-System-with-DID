@@ -173,6 +173,7 @@ def install_ticket_qr_routes(
     admin_logger,
     web3_client,
     ticket_contract,
+    credential_validator=None,
 ):
     """서버 발급 QR과 원자적 입장 검증 경로를 등록한다."""
     if getattr(app.state, "ticket_qr_routes_installed", False):
@@ -321,6 +322,8 @@ def install_ticket_qr_routes(
                         raise HTTPException(status_code=410, detail="QR이 만료되었습니다. 새 QR을 제시해주세요.")
 
                     payload = parsed["payload"]
+                    if credential_validator is not None:
+                        await credential_validator(cursor, payload['signer'], 'QR 서명자')
                     record_matches = (
                         int(ticket["format_version"]) == payload["v"]
                         and int(ticket["token_id"]) == parsed["token_id"]

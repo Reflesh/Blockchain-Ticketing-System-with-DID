@@ -144,6 +144,11 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </Animated.View>
 
+          <TouchableOpacity style={s.mobileWalletCard} onPress={() => router.push('/account-recovery')}>
+            <Text style={s.mobileWalletTitle}>비밀번호를 잊으셨나요?</Text>
+            <Text style={s.mobileWalletSub}>대학 이메일로 재인증하고 모바일 지갑을 복구하세요.</Text>
+          </TouchableOpacity>
+
           <View style={s.secRow}>
             <Ionicons name="shield-checkmark-outline" size={13} color="#2D2D40" />
             <Text style={s.secText}>개인키는 기기 밖으로 전송되지 않습니다</Text>

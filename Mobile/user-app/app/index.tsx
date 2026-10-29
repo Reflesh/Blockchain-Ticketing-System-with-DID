@@ -92,7 +92,7 @@ function ListCard({ item }: { item: Concert }) {
 
 // ─── Home screen ─────────────────────────────────────────
 export default function HomeScreen() {
-  const { address, accessToken, logout } = useWallet();
+  const { address, accessToken, logout, isRestoring } = useWallet();
   const shortAddr = address ? `${address.slice(0, 6)}···${address.slice(-4)}` : null;
   const [concerts, setConcerts] = useState<Concert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -240,6 +240,11 @@ export default function HomeScreen() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false}>
+          {isRestoring && (
+            <Text accessibilityLiveRegion="polite" style={s.loadStateText}>
+              저장된 로그인 정보를 확인하고 있습니다…
+            </Text>
+          )}
           {loading && (
             <View style={s.loadState}>
               <ActivityIndicator size="large" color="#E11D48" />
@@ -405,13 +410,13 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity style={s.drawerLogin} activeOpacity={0.8} onPress={() => { closeDrawer(); setTimeout(() => router.push('/login'), 280); }}>
+            <TouchableOpacity disabled={isRestoring} style={s.drawerLogin} activeOpacity={0.8} onPress={() => { closeDrawer(); setTimeout(() => router.push('/login'), 280); }}>
               <View style={s.drawerAvatar}>
                 <Ionicons name="person-outline" size={22} color="#6B7280" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.drawerLoginTitle}>로그인 해주세요</Text>
-                <Text style={s.drawerLoginSub}>지갑으로 로그인 →</Text>
+                <Text style={s.drawerLoginTitle}>{isRestoring ? '로그인 확인 중' : '로그인 해주세요'}</Text>
+                <Text style={s.drawerLoginSub}>{isRestoring ? '잠시만 기다려주세요.' : '지갑으로 로그인 →'}</Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
             </TouchableOpacity>
@@ -421,6 +426,7 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={s.drawerMenuItem}
+            disabled={isRestoring}
             onPress={() => { closeDrawer(); setTimeout(() => { if (address) router.push('/mypage'); else router.push('/login'); }, 280); }}
           >
             <Ionicons name="ticket-outline" size={18} color="#6B7280" />
@@ -429,6 +435,7 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={s.drawerMenuItem}
+            disabled={isRestoring}
             onPress={() => { closeDrawer(); setTimeout(() => router.push('/credential-wallet' as any), 280); }}
           >
             <Ionicons name="id-card-outline" size={18} color="#6B7280" />

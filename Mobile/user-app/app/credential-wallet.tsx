@@ -34,7 +34,7 @@ function formatDate(seconds: number) {
 }
 
 export default function CredentialWalletScreen() {
-  const { wallet, setSession, logout, isRestoring } = useWallet();
+  const { wallet, setSession, logout, isRestoring, storageError } = useWallet();
   const [permission, requestPermission] = useCameraPermissions();
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanLocked, setScanLocked] = useState(false);
@@ -42,6 +42,8 @@ export default function CredentialWalletScreen() {
   const [issuing, setIssuing] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<StoredCredential[]>([]);
+  const [credentialsLoading, setCredentialsLoading] = useState(true);
+  const [credentialsError, setCredentialsError] = useState('');
   const [hasSavedWallet, setHasSavedWallet] = useState(false);
   const [walletPassword, setWalletPassword] = useState('');
   const [walletBusy, setWalletBusy] = useState(false);
@@ -59,8 +61,11 @@ export default function CredentialWalletScreen() {
           ? '연결 URI를 확인했습니다. 모바일 VC 발급 및 로그인 버튼을 눌러주세요.'
           : '연결 URI를 확인했습니다. 위에 Wallet 비밀번호를 입력한 뒤 연결 버튼을 누르면 Wallet을 준비합니다.');
 
-  const refreshCredentials = useCallback(() => {
-    loadCredentials().then(setCredentials).catch(() => setCredentials([]));
+  const refreshCredentials = useCallback(async () => {
+    setCredentialsLoading(true); setCredentialsError('');
+    try { setCredentials(await loadCredentials()); }
+    catch (error) { setCredentialsError(error instanceof Error ? error.message : '인증서를 읽지 못했습니다.'); }
+    finally { setCredentialsLoading(false); }
   }, []);
 
   useFocusEffect(
@@ -96,6 +101,7 @@ export default function CredentialWalletScreen() {
             session.accessToken,
             session.accountWalletAddress,
           );
+          await refreshCredentials();
           setStatus(autoLoginSaved
             ? '로그인을 완료했습니다. 다음 앱 실행부터 자동으로 로그인됩니다.'
             : '로그인은 완료했지만 자동 로그인 정보를 저장하지 못했습니다.');
@@ -342,7 +348,7 @@ export default function CredentialWalletScreen() {
                 </View>
                 {hasSavedWallet && !walletBusy && (
                   <TouchableOpacity onPress={handleResetLocalWallet} style={s.resetWalletButton}>
-                    <Text style={s.resetWalletText}>비밀번호를 잊었나요? Wallet 초기화</Text>
+                    <Text style={s.resetWalletText}>기기의 Wallet 데이터 초기화</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -397,12 +403,29 @@ export default function CredentialWalletScreen() {
             {status && <Text style={s.status}>{status}</Text>}
           </View>
 
+          <TouchableOpacity style={s.walletButton} onPress={() => router.push('/account-recovery')}>
+            <Text style={s.walletButtonText}>비밀번호 변경 · 분실 복구 · 계정 관리</Text>
+          </TouchableOpacity>
+          {!!storageError && <Text style={s.status}>자동 로그인 저장 안내: {storageError}</Text>}
           <View style={s.sectionHeader}>
             <Text style={s.sectionTitle}>저장된 인증서</Text>
-            <Text style={s.count}>{credentials.length}</Text>
+            <Text style={s.count}>{credentialsLoading ? '확인 중' : credentialsError ? '확인 실패' : credentials.length}</Text>
           </View>
 
-          {credentials.length === 0 ? (
+          <TouchableOpacity style={s.walletButton} disabled={credentialsLoading || walletBusy || issuing} onPress={async () => {
+            setCredentialsLoading(true); setCredentialsError('');
+            try {
+              if (wallet) {
+                const session = await authenticateWallet(wallet);
+                await setSession(wallet, session.accessToken, session.accountWalletAddress);
+              }
+              await refreshCredentials();
+            } catch (error) { setCredentialsError(error instanceof Error ? error.message : '인증서 복원에 실패했습니다.'); }
+            finally { setCredentialsLoading(false); }
+          }}><Text style={s.walletButtonText}>학생 인증서 새로고침</Text></TouchableOpacity>
+          {!!credentialsError && <Text style={s.status}>{credentialsError}</Text>}
+
+          {credentialsLoading ? <ActivityIndicator color="#E11D48" /> : credentialsError ? null : credentials.length === 0 ? (
             <View style={s.emptyCard}>
               <Ionicons name="id-card-outline" size={34} color="#374151" />
               <Text style={s.emptyTitle}>저장된 학생 인증서가 없습니다</Text>

@@ -288,6 +288,20 @@ body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smooth
   background: #f8fafc; color: #94a3b8; border-color: #e2e8f0;
   text-decoration: line-through; text-decoration-color: #cbd5e1;
 }
+.account-tools { margin: 18px 0; padding: 20px; background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; }
+.account-tools h3, .account-tools h4 { margin: 12px 0; color: #1e293b; }
+.account-tools p { color: #64748b; font-size: 13px; line-height: 1.7; }
+.account-tools input { display: block; box-sizing: border-box; width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #e2e8f0; border-radius: 10px; }
+.account-tools button { padding: 10px 14px; border: 0; border-radius: 10px; background: #fce7ef; color: #be123c; margin: 5px 8px 5px 0; cursor: pointer; }
+.account-tools button:disabled { opacity: .5; cursor: wait; }
+.account-tools details { margin-top: 18px; border-top: 1px solid #e2e8f0; padding-top: 16px; }
+.account-tools summary { cursor: pointer; color: #475569; font-weight: 600; }
+.account-intent { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+.account-intent code { overflow-wrap: anywhere; max-width: 100%; }
+.account-link { border: 0; background: transparent; color: #be123c; cursor: pointer; padding: 10px 0; }
+.account-tools .account-danger, .account-tools .account-error { color: #be123c; }
+.account-recovery-qr { display: block; width: 200px; max-width: 100%; margin: 15px auto; }
+
 .seat-chip.received {
   background: #ecfdf5; color: #047857; border-color: #a7f3d0;
 }
@@ -458,11 +472,13 @@ body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smooth
 
 /* 다운로드 */
 .appguide-download-box { display: flex; gap: 32px; align-items: flex-start; flex-wrap: wrap; }
-.appguide-qr-placeholder { width: 160px; height: 160px; border: 2px dashed #cbd5e1; border-radius: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #f8fafc; flex-shrink: 0; }
+.appguide-download-code { width: 232px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 16px; display: flex; flex-direction: column; align-items: center; gap: 8px; background: #fff; flex-shrink: 0; }
 .appguide-qr-icon { font-size: 36px; }
 .appguide-qr-text { font-size: 12px; font-weight: 600; color: #64748b; margin: 0; text-align: center; }
 .appguide-qr-sub { font-size: 11px; color: #94a3b8; margin: 0; text-align: center; }
 .appguide-download-info { display: flex; flex-direction: column; gap: 14px; flex: 1; min-width: 200px; }
+.appguide-download-info a { text-decoration: none; color: inherit; }
+.appguide-download-qr { width: 200px; height: 200px; display: block; background: white; }
 .appguide-store-badge { display: flex; align-items: center; gap: 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 18px; font-size: 22px; }
 .appguide-store-label { font-size: 11px; color: #94a3b8; margin: 0; }
 .appguide-store-name { font-size: 14px; font-weight: 700; color: #0f172a; margin: 2px 0 0; }

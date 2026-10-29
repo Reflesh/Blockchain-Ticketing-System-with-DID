@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TicketPro 앱 설치</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#fff7fb;color:#29232b;font-family:system-ui,-apple-system,sans-serif;line-height:1.65}
+    main{max-width:760px;margin:64px auto;padding:0 24px}a{color:#c62b72}h1{font-size:2rem;margin:8px 0}p{color:#635965}
+    .brand{font-weight:800;color:#df3e83;letter-spacing:.05em}.apps{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:30px 0}
+    article{background:white;border:1px solid #f1dce7;border-radius:20px;padding:26px}h2{font-size:1.2rem;margin:0 0 8px}
+    .button{display:block;text-align:center;text-decoration:none;background:#df3e83;color:white;border-radius:12px;padding:13px 16px;margin-top:24px;font-weight:700}
+    .admin{background:#3c3340}aside{border-top:1px solid #efdae5;padding-top:18px}li{margin:10px 0}.back{display:inline-block;margin-top:24px}
+    @media(max-width:560px){main{margin-top:36px}.apps{grid-template-columns:1fr}}
+  </style>
+</head>
+<body><main>
+  <div class="brand">TICKETPRO</div>
+  <h1>휴대폰에 앱 설치하기</h1>
+  <p>Android 휴대폰과 에뮬레이터에서 사용할 수 있는 시연용 앱입니다. Expo Go 없이 실행되며, 서비스 이용에는 인터넷 연결이 필요합니다.</p>
+  <section class="apps" aria-label="앱 다운로드">
+    <article><h2>사용자 앱</h2><p>학생 인증서를 관리하고 구매한 티켓의 QR을 표시합니다.</p><a class="button" href="ticketpro-user-v3.apk" download>사용자 APK 다운로드</a></article>
+    <article><h2>관리자 앱</h2><p>휴대폰 카메라로 티켓 QR을 스캔하고 입장을 처리합니다.</p><a class="button admin" href="ticketpro-admin-v2.apk" download>관리자 APK 다운로드</a></article>
+  </section>
+  <aside><h2>설치 순서</h2><ol><li>휴대폰에서 필요한 APK를 다운로드하고 파일을 엽니다.</li><li>설치 권한 안내가 나오면 해당 브라우저 또는 파일 앱의 설치를 허용합니다.</li><li>앱을 실행하고 로그인합니다. QR을 스캔할 때 카메라 권한을 허용해주세요.</li></ol>
+    <p>기존 TicketPro 시연 앱이 있다면 삭제하지 않고 업데이트 설치해주세요. Expo Go에서 사용하던 계정은 처음 한 번 로그인하거나 모바일 연결이 필요합니다.</p>
+  </aside>
+  <a class="back" href="/">TicketPro 웹으로 돌아가기</a>
+</main></body></html>

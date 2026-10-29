@@ -29,7 +29,7 @@ async function hasActiveMobileCredential(walletAddress: string): Promise<boolean
   const now = Math.floor(Date.now() / 1000);
   const credentials = await loadCredentials();
   return credentials.some((credential) => (
-    credential.credentialConfigurationId === MOBILE_CREDENTIAL_CONFIGURATION_ID
+    [MOBILE_CREDENTIAL_CONFIGURATION_ID, 'PukyongStudentCredential'].includes(credential.credentialConfigurationId)
     && credential.subject.toLowerCase() === expectedSubject
     && credential.expiresAt > now
   ));
@@ -40,9 +40,9 @@ export async function saveSecureSession(
   accessToken: string,
   accountWalletAddress: string,
 ): Promise<boolean> {
-  if (!await SecureStore.isAvailableAsync()) return false;
-  if (!accessToken || !ethers.isAddress(accountWalletAddress)) return false;
-  if (!await hasActiveMobileCredential(wallet.address)) return false;
+  if (!await SecureStore.isAvailableAsync()) throw new Error('이 환경에서는 보안 저장소를 사용할 수 없습니다. Android/iOS 앱에서 실행해주세요.');
+  if (!accessToken || !ethers.isAddress(accountWalletAddress)) throw new Error('저장할 로그인 정보가 올바르지 않습니다.');
+  if (!await hasActiveMobileCredential(wallet.address)) throw new Error('기기에 학생 인증서가 없습니다. 인증서를 새로고침하거나 다시 로그인해주세요.');
 
   const session: StoredSecureSession = {
     version: 1,
@@ -83,9 +83,7 @@ export async function loadSecureSession(): Promise<RestoredSecureSession | null>
     if (wallet.address.toLowerCase() !== parsed.signerAddress.toLowerCase()) {
       throw new Error('저장된 Wallet 키와 주소가 일치하지 않습니다.');
     }
-    if (!await hasActiveMobileCredential(wallet.address)) {
-      throw new Error('사용 가능한 모바일 학생 인증서가 없습니다.');
-    }
+    // Missing/expired local credentials can be restored after server verification.
     return {
       wallet,
       accountWalletAddress: ethers.getAddress(parsed.accountWalletAddress),

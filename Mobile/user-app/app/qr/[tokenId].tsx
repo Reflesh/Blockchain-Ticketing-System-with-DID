@@ -18,9 +18,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import Svg, { Circle } from 'react-native-svg';
 import { getBookings } from '@/services/ticketApi';
+import { authenticatedFetch } from '@/lib/sessionTransport';
 
-const CHALLENGE_REFRESH_SECONDS = 10;
 const QR_VALIDITY_SECONDS = 20;
+const CHALLENGE_REFRESH_SECONDS = QR_VALIDITY_SECONDS;
 const restoreSystemBrightness = Brightness.useSystemBrightnessAsync;
 
 // ─── 카운트다운 링 ────────────────────────────────────
@@ -91,7 +92,8 @@ export default function QRScreen() {
   const { wallet, address, accessToken } = useWallet();
   const [qrValue, setQrValue] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(QR_VALIDITY_SECONDS);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const qrExpiresAt = useRef<number | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const generationInFlight = useRef(false);
   const eligibilityVerifiedFor = useRef<string | null>(null);
@@ -149,6 +151,10 @@ export default function QRScreen() {
     }
 
     generationInFlight.current = true;
+    qrExpiresAt.current = null;
+    setQrValue(null);
+    setQrError(null);
+    setSecondsLeft(0);
     try {
       if (eligibilityVerifiedFor.current !== canonicalTokenId) {
         const bookings = await getBookings(address, accessToken);
@@ -166,7 +172,7 @@ export default function QRScreen() {
         }
         eligibilityVerifiedFor.current = canonicalTokenId;
       }
-      const response = await fetch(
+      const response = await authenticatedFetch(
         `${TICKET_API_URL}/tickets/${encodeURIComponent(canonicalTokenId)}/qr-challenge`,
         {
           method: 'POST',
@@ -199,9 +205,16 @@ export default function QRScreen() {
         throw new Error('서버 QR 서명자와 현재 모바일 Wallet이 일치하지 않습니다.');
       }
       const signature = await wallet.signMessage(signingMessage);
+      const serverDate = Date.parse(response.headers.get('date') ?? '');
+      const serverNow = Number.isFinite(serverDate) ? serverDate / 1000 : challenge.issued_at;
+      const remaining = Math.min(QR_VALIDITY_SECONDS, Math.max(0, challenge.expires_at - serverNow));
+      if (remaining === 0) {
+        throw new Error('QR이 만료되었습니다. 새 QR 발급을 기다려주세요.');
+      }
+      qrExpiresAt.current = Date.now() + remaining * 1000;
       setQrValue(JSON.stringify({ payload, signature }));
       setQrError(null);
-      setSecondsLeft(Math.max(0, challenge.expires_at - Math.floor(Date.now() / 1000)));
+      setSecondsLeft(remaining);
       pulse();
     } catch (error) {
       setQrValue(null);
@@ -220,8 +233,14 @@ export default function QRScreen() {
 
   useEffect(() => {
     const iv = setInterval(() => {
-      setSecondsLeft((n) => (n > 0 ? n - 1 : 0));
-    }, 1000);
+      if (qrExpiresAt.current === null) return;
+      const remaining = Math.min(QR_VALIDITY_SECONDS, Math.max(0, Math.ceil((qrExpiresAt.current - Date.now()) / 1000)));
+      setSecondsLeft(remaining);
+      if (remaining === 0) {
+        qrExpiresAt.current = null;
+        setQrValue(null);
+      }
+    }, 250);
     return () => clearInterval(iv);
   }, [qrValue]);
 
@@ -261,7 +280,7 @@ export default function QRScreen() {
         <Animated.View
           style={[s.qrCard, { transform: [{ scale: pulseAnim }] }]}
         >
-          {qrValue ? (
+          {qrValue && secondsLeft > 0 ? (
             <QRCode
               value={qrValue}
               size={216}
@@ -271,7 +290,7 @@ export default function QRScreen() {
           ) : (
             <View style={s.qrPlaceholder}>
               <Text style={s.qrPlaceholderText}>
-                {qrError ?? '서버 보안 QR 생성 중...'}
+                {qrError ?? 'QR 갱신 중…'}
               </Text>
             </View>
           )}
@@ -280,7 +299,7 @@ export default function QRScreen() {
         {/* 카운트다운 */}
         <View style={s.countdown}>
           <CountdownRing seconds={secondsLeft} total={QR_VALIDITY_SECONDS} />
-          <Text style={s.countdownLabel}>초 동안 유효 · 10초마다 안전하게 갱신</Text>
+          <Text style={s.countdownLabel}>발급 후 20초 동안 유효합니다</Text>
         </View>
       </View>
 

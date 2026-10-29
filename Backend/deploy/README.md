@@ -13,7 +13,7 @@
 ## 배포 전에 반드시 할 일
 
 1. 기존 `auth_server.py`, `.env`, `DID_ABI.json`과 서비스 설정을 권한이 제한된 백업 디렉터리에 복사한다.
-2. `.env.production.example`을 참고하되 실제 비밀값은 저장소에 커밋하지 않는다. 기존 `.env`를 보존해야 하면 비밀값이 없는 `.env.auth.runtime`으로 실행 설정만 덮어쓴다.
+2. `../.env.auth.example`을 참고하되 실제 비밀값은 저장소에 커밋하지 않는다. 기존 `.env`를 보존해야 하면 `.env.auth.runtime`으로 실행 설정만 덮어쓴다. runtime 파일도 공유하지 않는다.
 3. `.env` 파일 권한을 `600`, 애플리케이션 디렉터리를 `700` 또는 필요한 최소 권한으로 제한한다.
 4. `AUTH_SERVICE_KEY`, Issuer 키, CI salt, Gmail 앱 비밀번호를 비밀 관리 도구에서 주입한다.
 5. Nginx 인증서 발급 후 예시의 `auth.example.com`을 실제 도메인으로 바꾼다.

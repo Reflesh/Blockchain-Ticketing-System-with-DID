@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { fetchWithTimeout } from '@/lib/requestTimeout';
 
 import { AUTH_API_URL } from '@/constants/api';
 import { verifySessionAccount } from '@/lib/auth';
@@ -70,10 +71,10 @@ export async function completeMobilePairing(
 ): Promise<PairingResult> {
   const pairingToken = extractMobilePairingToken(scannedValue);
   const challenge = await responseJson(
-    await fetch(`${AUTH_API_URL}/login-challenge`, {
+    await fetchWithTimeout(`${AUTH_API_URL}/login-challenge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wallet_address: wallet.address }),
+      body: JSON.stringify({ wallet_address: wallet.address, purpose: 'pairing' }),
     }),
   );
   if (!challenge.nonce || !challenge.message) {
@@ -82,7 +83,7 @@ export async function completeMobilePairing(
 
   const signature = await wallet.signMessage(String(challenge.message));
   const completed = await responseJson(
-    await fetch(`${AUTH_API_URL}/mobile-pairings/complete`, {
+    await fetchWithTimeout(`${AUTH_API_URL}/mobile-pairings/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -112,6 +113,7 @@ export async function completeMobilePairing(
     wallet,
     completed.jwks_uri,
     'TicketProMobileCredential',
+    completed.account_wallet_address,
   );
   await verifySessionAccount(completed.access_token, completed.account_wallet_address);
   return {

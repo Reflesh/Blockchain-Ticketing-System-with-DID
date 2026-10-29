@@ -1,0 +1,28 @@
+# Render PUBLIC_HOST after its DNS record points to the main EC2 instance.
+{
+    acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
+PUBLIC_HOST {
+    encode zstd gzip
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+    @api path /api /api/* /oid4vci/* /.well-known/*
+    @apk path /downloads/*.apk
+    header @apk Content-Type application/vnd.android.package-archive
+    handle @api {
+        reverse_proxy 127.0.0.1:8000
+    }
+    handle /downloads/* {
+        root * /var/www/ticketpro
+        header Cache-Control "no-store"
+        file_server
+    }
+    handle {
+        root * /var/www/ticketpro/site
+        try_files {path} /index.html
+        file_server
+    }
+}

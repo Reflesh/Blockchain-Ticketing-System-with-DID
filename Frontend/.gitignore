@@ -26,3 +26,4 @@ dist-ssr
 # Environment Variables (환경변수 절대 방어!)
 .env
 .env.*
+!.env.example

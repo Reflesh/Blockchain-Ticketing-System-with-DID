@@ -1,3 +1,5 @@
+import Constants from 'expo-constants';
+
 function requirePublicUrl(name: string, value: string | undefined): string {
   const normalized = value?.trim().replace(/\/$/, '');
   if (!normalized) {
@@ -8,5 +10,5 @@ function requirePublicUrl(name: string, value: string | undefined): string {
 
 export const TICKET_API_URL = requirePublicUrl(
   'EXPO_PUBLIC_TICKET_API_URL',
-  process.env.EXPO_PUBLIC_TICKET_API_URL,
+  process.env.EXPO_PUBLIC_TICKET_API_URL || Constants.expoConfig?.extra?.ticketproApiUrl || 'https://ticketpro.duckdns.org/api',
 );

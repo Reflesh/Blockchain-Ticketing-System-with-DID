@@ -2,6 +2,8 @@ import { ethers } from 'ethers';
 import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 import { authenticateWallet, verifySessionAccount, WalletRequestError } from '@/lib/auth';
+import { synchronizeCredential } from '@/lib/credentialSync';
+import { installSessionTransport } from '@/lib/sessionTransport';
 import {
   clearSecureSession,
   loadSecureSession,
@@ -15,6 +17,7 @@ type WalletContextType = {
   signerAddress: string | null;
   isLinkedAccount: boolean;
   isRestoring: boolean;
+  storageError: string | null;
   setSession: (
     wallet: ethers.Wallet | null,
     accessToken: string | null,
@@ -30,7 +33,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isRestoring, setIsRestoring] = useState(true);
+  const [storageError, setStorageError] = useState<string | null>(null);
+  const sessionRef = useRef({ wallet, address, accessToken });
+  sessionRef.current = { wallet, address, accessToken };
+  const renewInFlight = useRef<Promise<string> | null>(null);
+  const setSessionRef = useRef<WalletContextType['setSession'] | null>(null);
   const sessionGeneration = useRef(0);
+  const logoutGeneration = useRef(0);
   const restoreController = useRef<AbortController | null>(null);
   const sessionStorageQueue = useRef<Promise<void>>(Promise.resolve());
 
@@ -65,6 +74,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         let accountWalletAddress = saved.accountWalletAddress;
         try {
           await verifySessionAccount(token, accountWalletAddress, controller.signal);
+          await synchronizeCredential(saved.wallet, token, controller.signal);
         } catch (error) {
           if (!isCurrent()) return;
           if (!(error instanceof WalletRequestError) || error.reason !== 'http' || error.status !== 401) throw error;
@@ -108,10 +118,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     newToken: string | null,
     accountAddress?: string,
   ): Promise<boolean> => {
+    if (sessionRef.current.wallet?.address !== newWallet?.address || sessionRef.current.address !== (accountAddress ?? newWallet?.address ?? null)) logoutGeneration.current++;
     const generation = ++sessionGeneration.current;
     restoreController.current?.abort();
     restoreController.current = null;
     setIsRestoring(false);
+    setStorageError(null);
+    sessionRef.current = { wallet: newWallet, address: accountAddress ?? newWallet?.address ?? null, accessToken: newToken };
     setWalletState(newWallet);
     setAddress(accountAddress ?? newWallet?.address ?? null);
     setAccessToken(newToken);
@@ -124,16 +137,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         return generation === sessionGeneration.current && saved;
       } catch (error) {
         console.warn('자동 로그인 정보를 저장하지 못했습니다.', error);
+        setStorageError(error instanceof Error ? error.message : '보안 저장소에 로그인 정보를 저장하지 못했습니다.');
       }
     }
     return false;
   };
 
   const logout = async () => {
+    logoutGeneration.current++;
     const generation = ++sessionGeneration.current;
     restoreController.current?.abort();
     restoreController.current = null;
     setIsRestoring(false);
+    sessionRef.current = { wallet: null, address: null, accessToken: null };
+    renewInFlight.current = null;
     setWalletState(null);
     setAddress(null);
     setAccessToken(null);
@@ -148,6 +165,31 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  setSessionRef.current = setSession;
+  useEffect(() => installSessionTransport({
+    token: () => sessionRef.current.accessToken,
+    epoch: () => logoutGeneration.current,
+    renew: () => {
+      if (renewInFlight.current) return renewInFlight.current;
+      const before = sessionRef.current;
+      const generation = sessionGeneration.current;
+      if (!before.wallet || !before.address || !before.accessToken) return Promise.reject(new Error('다시 로그인해주세요.'));
+      const signingWallet = before.wallet;
+      const pending = (async () => {
+        const refreshed = await authenticateWallet(signingWallet);
+        if (generation !== sessionGeneration.current || refreshed.accountWalletAddress.toLowerCase() !== before.address!.toLowerCase()) {
+          throw new Error('로그인 상태가 변경되었습니다. 다시 로그인해주세요.');
+        }
+        await setSessionRef.current!(signingWallet, refreshed.accessToken, refreshed.accountWalletAddress);
+        if (sessionRef.current.accessToken !== refreshed.accessToken) throw new Error('로그인 상태가 변경되었습니다.');
+        return refreshed.accessToken;
+      })();
+      renewInFlight.current = pending;
+      void pending.finally(() => { if (renewInFlight.current === pending) renewInFlight.current = null; }).catch(() => {});
+      return pending;
+    },
+  }), []);
+
   const signerAddress = wallet?.address ?? null;
   const isLinkedAccount = Boolean(wallet && address && accessToken);
 
@@ -159,6 +201,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       signerAddress,
       isLinkedAccount,
       isRestoring,
+      storageError,
       setSession,
       logout,
     }}>

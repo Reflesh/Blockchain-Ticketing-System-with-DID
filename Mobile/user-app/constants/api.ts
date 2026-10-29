@@ -1,4 +1,6 @@
-const DEFAULT_MAIN_API_URL = 'http://43.201.77.114:8000/api';
+import Constants from 'expo-constants';
+
+const DEFAULT_MAIN_API_URL = Constants.expoConfig?.extra?.ticketproApiUrl || 'https://ticketpro.duckdns.org/api';
 
 export const TICKET_API_URL =
   process.env.EXPO_PUBLIC_TICKET_API_URL || DEFAULT_MAIN_API_URL;
@@ -8,4 +10,4 @@ export const AUTH_API_URL =
   process.env.EXPO_PUBLIC_AUTH_API_URL || DEFAULT_MAIN_API_URL;
 
 export const TICKET_WEB_URL =
-  process.env.EXPO_PUBLIC_TICKET_WEB_URL || 'http://43.201.77.114:5173';
+  process.env.EXPO_PUBLIC_TICKET_WEB_URL || Constants.expoConfig?.extra?.ticketproWebUrl || 'https://ticketpro.duckdns.org';

@@ -1,5 +1,5 @@
 import { DarkTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import 'react-native-get-random-values';
@@ -8,8 +8,11 @@ import { useWallet, WalletProvider } from '@/context/WalletContext';
 
 function AppNavigator() {
   const { isRestoring } = useWallet();
+  const pathname = usePathname();
 
-  if (isRestoring) {
+  // Public events can render while the saved session is verified. Private
+  // screens still wait for verification; no unverified token is exposed.
+  if (isRestoring && pathname !== '/') {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#E11D48" />
@@ -26,6 +29,8 @@ function AppNavigator() {
         <Stack.Screen name="login" />
         <Stack.Screen name="mypage" />
         <Stack.Screen name="credential-wallet" />
+        <Stack.Screen name="account-recovery" />
+        <Stack.Screen name="transfer-ticket" />
         <Stack.Screen name="qr/[tokenId]" />
       </Stack>
       <StatusBar style="light" />

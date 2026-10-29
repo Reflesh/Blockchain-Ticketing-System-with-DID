@@ -2,6 +2,10 @@ import logging
 
 
 logger = logging.getLogger(__name__)
+try:
+    from .account_guard import serialize_accounts
+except ImportError:
+    from account_guard import serialize_accounts
 
 
 try:
@@ -584,7 +588,17 @@ def expire_checkout_holds(limit=200):
     return released
 
 
+async def purchase_accounts(arguments):
+    return [arguments['session_wallet']]
+
+
+async def transfer_accounts(arguments):
+    _, sender, recipient, _ = await load_transfer_context(arguments['request'])
+    return [sender, recipient]
+
+
 @app.post("/api/checkout/prepare", summary="결제 전 좌석 원자적 선점")
+@serialize_accounts(get_db_connection, purchase_accounts)
 async def prepare_checkout_api(request: CheckoutPrepareRequest, session_wallet=Depends(require_user_session)):
     _validate_purchase_request(request, session_wallet)
     await asyncio.to_thread(expire_checkout_holds)
@@ -747,6 +761,7 @@ async def release_checkout_api(request: CheckoutReleaseRequest, session_wallet=D
 
 
 @app.post("/api/buy-tickets", summary="스마트 티켓 예매 (결제 검증 + 가스비 대납 + SBT 발행)")
+@serialize_accounts(get_db_connection, purchase_accounts)
 async def buy_tickets_api(request: TicketRequest, session_wallet=Depends(require_user_session)):
     """
     [Web 2.5 결제 흐름 - 포트원 V2]
@@ -1147,6 +1162,7 @@ async def transfer_ticket_challenge_api(request: TransferChallengeRequest, sessi
 
 
 @app.post("/api/transfer-ticket", summary="EIP-712 서명 기반 서버 가스 대납 양도")
+@serialize_accounts(get_db_connection, transfer_accounts)
 async def transfer_ticket_api(request: TransferRequest, session_wallet=Depends(require_user_session)):
     tx_hash_hex = None
     tx_submission_attempted = False
@@ -1189,10 +1205,10 @@ async def transfer_ticket_api(request: TransferRequest, session_wallet=Depends(r
                         """
                         INSERT INTO blockchain_transactions (
                             booking_id, tx_hash, tx_type, tx_status, chain_id,
-                            contract_address, buyer_wallet_address, gas_price_wei
-                        ) VALUES (%s, %s, 'ticket_transfer', 'pending', %s, %s, %s, %s)
+                            contract_address, buyer_wallet_address, gas_price_wei, recipient_wallet_address
+                        ) VALUES (%s, %s, 'ticket_transfer', 'pending', %s, %s, %s, %s, %s)
                         """,
-                        (item["booking_id"], tx_hash_hex, EXPECTED_CHAIN_ID, contract.address, sender, gas_price),
+                        (item["booking_id"], tx_hash_hex, EXPECTED_CHAIN_ID, contract.address, sender, gas_price, recipient),
                     )
                 conn.commit()
             tx_submission_attempted = True

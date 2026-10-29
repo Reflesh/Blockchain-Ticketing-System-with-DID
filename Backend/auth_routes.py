@@ -121,6 +121,17 @@ def install_gateway_routes(app, gateway):
         app.add_api_route(path, get_handler(path), methods=["GET"],
                           name="auth_" + name.replace("-", "_"))
 
+    def account_handler(path):
+        async def endpoint(request: Request):
+            return await relay_bytes('POST', path, await request.body(),
+                                     request.headers.get('content-type', 'application/json'),
+                                     request.headers.get('authorization', ''))
+        return endpoint
+
+    for name in ('recovery/request', 'recovery/verify', 'credential', 'withdraw/challenge'):
+        path = '/api/account/' + name
+        app.add_api_route(path, account_handler(path), methods=['POST'], name='account_'+name.replace('/', '_'))
+
     @app.get("/api/did/{address}")
     async def did_document(address: str):
         if not ADDRESS.fullmatch(address):

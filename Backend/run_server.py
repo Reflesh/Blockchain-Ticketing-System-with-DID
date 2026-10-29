@@ -134,6 +134,9 @@ def main() -> None:
     # 어느 위치에서 실행해도 auth_server.py와 blockchain_backend.py를 찾는다.
     if str(BASE_DIR) not in sys.path:
         sys.path.insert(0, str(BASE_DIR))
+    # Resolve certificate/other relative paths in DATABASE_URL consistently,
+    # including when this launcher is called from the repository root.
+    os.chdir(BASE_DIR)
 
     print(f"설정 파일: {env_path}")
     if runtime_path.is_file():

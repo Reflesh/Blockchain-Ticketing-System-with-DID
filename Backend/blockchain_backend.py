@@ -9,7 +9,6 @@ from web3.middleware import ExtraDataToPOAMiddleware
 from psycopg.rows import dict_row
 from eth_account.messages import encode_defunct
 import asyncio
-import fcntl
 import hashlib
 import hmac
 import json
@@ -25,9 +24,11 @@ from dotenv import load_dotenv
 try:
     from .auth_s2s import ADDRESS, AuthGateway, AuthServiceUnavailable, SessionIdentity
     from .auth_routes import install_gateway_routes
+    from .process_lock import process_lock
 except ImportError:
     from auth_s2s import ADDRESS, AuthGateway, AuthServiceUnavailable, SessionIdentity
     from auth_routes import install_gateway_routes
+    from process_lock import process_lock
 
 # =================================================================
 # 1. 환경 변수 및 Web3 초기 세팅
@@ -35,9 +36,7 @@ except ImportError:
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 
-if not os.path.exists(ENV_PATH):
-    raise Exception("❌ blockchain_backend/.env 파일을 찾을 수 없습니다.")
-
+# run_server.py can supply .env.backend or process environment variables instead.
 load_dotenv(ENV_PATH)
 
 # 기존 세션/VC SQL 검증을 기본값으로 유지하고 배포 설정으로 내부 API에 전환한다.
@@ -100,13 +99,8 @@ print(f"✅ TicketPro 컨트랙트 연결 완료: {contract.address}")
 @contextmanager
 def serialized_server_transaction():
     """Serialize nonce allocation across workers on this host."""
-    lock_path = f"/tmp/ticketpro-nonce-{server_account.address.lower()}.lock"
-    with open(lock_path, "w", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    with process_lock(f"ticketpro-nonce-{server_account.address.lower()}.lock"):
+        yield
 
 # =================================================================
 # 2. PostgreSQL(RDS) 연결 확인 및 변환 헬퍼
@@ -119,6 +113,12 @@ def init_db():
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("SELECT 1")
+                try:
+                    from .mobile_transfers import init_mobile_transfers
+                except ImportError:
+                    from mobile_transfers import init_mobile_transfers
+                init_mobile_transfers(cursor)
+                cursor.execute('ALTER TABLE blockchain_transactions ADD COLUMN IF NOT EXISTS recipient_wallet_address TEXT')
                 required_tables = [
                     "users",
                     "identity_verifications",
@@ -771,8 +771,21 @@ def install_api_routes():
         log_admin_action,
         web3,
         contract,
+        credential_validator=require_active_vc_holder,
     )
     return blockchain_backend_api
 
 
 API_ROUTES = install_api_routes()
+
+try:
+    from .account_main import install_account_main
+except ImportError:
+    from account_main import install_account_main
+install_account_main(app, get_db_connection, require_user_session, AUTH_GATEWAY)
+
+try:
+    from .mobile_transfers import install_mobile_transfers
+except ImportError:
+    from mobile_transfers import install_mobile_transfers
+install_mobile_transfers(app, get_db_connection, require_user_identity, API_ROUTES)

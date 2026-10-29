@@ -47,12 +47,12 @@ def _holder_jwk(private_key: keys.PrivateKey) -> dict:
     }
 
 
-def _signed_challenge(client: TestClient, private_key: keys.PrivateKey, headers: dict) -> dict:
+def _signed_challenge(client: TestClient, private_key: keys.PrivateKey, headers: dict, purpose='login') -> dict:
     address = private_key.public_key.to_checksum_address()
     challenge_response = client.post(
         "/api/login-challenge",
         headers=headers,
-        json={"wallet_address": address},
+        json={"wallet_address": address, 'purpose':purpose},
     )
     assert challenge_response.status_code == 200, challenge_response.text
     challenge = challenge_response.json()
@@ -127,7 +127,7 @@ def test_web_to_mobile_pairing_and_revoke():
             assert base64.b64decode(pairing["qr_png_base64"]).startswith(b"\x89PNG\r\n\x1a\n")
             pairing_token = parse_qs(urlparse(pairing["pairing_uri"]).query)["token"][0]
 
-            mobile_proof = _signed_challenge(client, mobile_key, service_headers)
+            mobile_proof = _signed_challenge(client, mobile_key, service_headers, 'pairing')
             completion_response = client.post(
                 "/api/mobile-pairings/complete",
                 headers=service_headers,
@@ -182,7 +182,7 @@ def test_web_to_mobile_pairing_and_revoke():
             assert login_response.json()["auth_provider"] == "mobile_did"
             assert login_response.json()["account_wallet_address"].lower() == primary_address.lower()
 
-            replay_proof = _signed_challenge(client, mobile_key, service_headers)
+            replay_proof = _signed_challenge(client, mobile_key, service_headers, 'pairing')
             replay_response = client.post(
                 "/api/mobile-pairings/complete",
                 headers=service_headers,

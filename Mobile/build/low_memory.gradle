@@ -1,0 +1,13 @@
+// AGP invokes Ninja directly, so CMAKE_BUILD_PARALLEL_LEVEL alone is insufficient.
+gradle.beforeProject { project ->
+    def nativeJobs = System.getenv('TICKETPRO_NATIVE_JOBS') ?: '1'
+    ['com.android.application', 'com.android.library'].each { pluginName ->
+        project.plugins.withId(pluginName) {
+            project.extensions.getByName('android').defaultConfig.externalNativeBuild.cmake.arguments(
+                "-DCMAKE_JOB_POOLS=ticketpro_compile=${nativeJobs};ticketpro_link=1",
+                '-DCMAKE_JOB_POOL_COMPILE=ticketpro_compile',
+                '-DCMAKE_JOB_POOL_LINK=ticketpro_link'
+            )
+        }
+    }
+}

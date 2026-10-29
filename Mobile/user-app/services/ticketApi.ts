@@ -1,4 +1,5 @@
 import { TICKET_API_URL } from '@/constants/api';
+import { authenticatedFetch } from '@/lib/sessionTransport';
 import type { EventResponse } from '@/constants/concerts';
 
 export type EventSession = {
@@ -76,7 +77,7 @@ function errorMessage(body: ApiEnvelope<unknown> | null, fallback: string) {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<ApiEnvelope<T>> {
-  const response = await fetch(`${TICKET_API_URL}${path}`, init);
+  const response = await authenticatedFetch(`${TICKET_API_URL}${path}`, init);
   const body = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
 
   if (!response.ok) {

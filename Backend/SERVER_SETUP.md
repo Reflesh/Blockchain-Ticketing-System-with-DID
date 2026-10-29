@@ -16,7 +16,10 @@ Linux/macOS:
 ```bash
 cd Backend
 cp .env.auth.example .env
-./venv/bin/python run_server.py auth
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python run_server.py auth
 ```
 
 Windows PowerShell:
@@ -24,19 +27,15 @@ Windows PowerShell:
 ```powershell
 cd Backend
 Copy-Item .env.auth.example .env
-.\venv\Scripts\python.exe run_server.py auth
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python run_server.py auth
 ```
 
-현재 AWS Auth 서버처럼 소스가 `/home/admin`에 있다면 실행 명령은 다음 한 줄이다.
-
-```bash
-cd /home/admin
-./venv/bin/python run_server.py auth
-```
-
-현재 AWS Auth 서버에는 기존 `.env`를 보존하기 위해 비밀값이 없는
-`.env.auth.runtime`을 별도로 둔다. 따라서 위 명령만 입력하면 기존의 긴 환경변수
-목록이 자동 적용된다.
+인증 서버 소스가 별도 폴더에 있다면 해당 폴더에서 실행한다. 기존 설정을 유지하면서
+공개 주소 등을 바꿀 때는 `.env.auth.runtime`을 사용할 수 있다. 이 파일도 서버별
+개인 설정이므로 Git에는 포함하지 않는다.
 
 ## Main Backend 최초 설정
 
@@ -56,10 +55,10 @@ Copy-Item .env.backend.example .env
 .\venv\Scripts\python.exe run_server.py backend
 ```
 
-현재 AWS Main 서버에서는 다음과 같이 실행한다.
+이미 생성된 가상환경을 사용하는 서버에서는 실제 프로젝트 폴더로 이동해 실행한다.
 
 ```bash
-cd /home/admin/file0911/Backend
+cd /path/to/checkout/Backend
 ./venv/bin/python run_server.py backend
 ```
 
@@ -87,10 +86,12 @@ cd /home/admin/file0911/Backend
 ## Git에 올려도 되는 항목
 
 - `.env.auth.example`, `.env.backend.example`: 가능
-- `.env.auth.runtime.example`: 가능
 - `run_server.py`, 이 문서: 가능
 - 실제 `.env`, `.env.auth.runtime`, `.env.backend.runtime`: 금지
 - DB 비밀번호, Issuer/Ticket 개인키, Gmail 앱 비밀번호, `AUTH_SERVICE_KEY`: 금지
 
 이미 실제 비밀값이 Git에 커밋된 적이 있다면 파일을 삭제하는 것만으로 충분하지 않다.
 해당 비밀값을 모두 교체하고 필요하면 Git 기록에서도 제거해야 한다.
+
+공유 작업 시 저장소 루트의 README에 있는 `.env.auth`, `.env.backend` 분리 실행 방식도
+사용할 수 있다. Linux 배포 경로와 Windows 개발 경로가 같을 필요는 없다.

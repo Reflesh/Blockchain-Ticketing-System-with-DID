@@ -1,6 +1,8 @@
 import { ethers } from 'ethers';
 
 import { AUTH_API_URL, TICKET_API_URL } from '@/constants/api';
+import { synchronizeCredential } from '@/lib/credentialSync';
+import { finalizeReplacementWallet } from '@/lib/oid4vci';
 
 export type WalletSession = {
   accessToken: string;
@@ -137,6 +139,8 @@ export async function authenticateWallet(wallet: ethers.Wallet, signal?: AbortSi
     ? verified.account_wallet_address
     : wallet.address;
   await verifySessionAccount(verified.access_token, accountWalletAddress, signal);
+  await synchronizeCredential(wallet, verified.access_token, signal, accountWalletAddress);
+  await finalizeReplacementWallet(wallet);
   if (signal?.aborted) throw new WalletRequestError('cancelled', '로그인 요청이 취소되었습니다.');
   return { accessToken: verified.access_token, accountWalletAddress };
 }

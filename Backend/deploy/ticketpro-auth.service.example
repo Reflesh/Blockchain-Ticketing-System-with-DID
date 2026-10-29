@@ -5,12 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=admin
-Group=admin
-WorkingDirectory=/home/admin/ticketpro-auth
-EnvironmentFile=/home/admin/ticketpro-auth/.env
+# Example Linux service account/path; create or replace them before installation.
+User=ticketpro
+Group=ticketpro
+WorkingDirectory=/srv/ticketpro-auth
+EnvironmentFile=/srv/ticketpro-auth/.env
 # 기존 .env는 수정하지 않고, 선택적인 .env.auth.runtime을 run_server.py가 덮어쓴다.
-ExecStart=/home/admin/ticketpro-auth/.venv/bin/python /home/admin/ticketpro-auth/run_server.py auth
+ExecStart=/srv/ticketpro-auth/.venv/bin/python /srv/ticketpro-auth/run_server.py auth
 Restart=on-failure
 RestartSec=5
 PrivateTmp=true

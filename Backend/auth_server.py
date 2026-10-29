@@ -16,7 +16,7 @@ from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Union, Optional, List, Dict
+from typing import Union, Optional, List, Dict, Literal
 from urllib.parse import parse_qs, quote
 
 import qrcode
@@ -29,6 +29,14 @@ from eth_account.messages import encode_defunct
 from eth_utils import is_checksum_address
 from eth_keys import keys
 from dotenv import load_dotenv
+try:
+    from .account_lifecycle import init_account_lifecycle, install_account_lifecycle
+    from .wallet_challenges import challenge_message, validate_challenge
+    from .credential_profile import credential_payload as build_credential_payload
+except ImportError:
+    from account_lifecycle import init_account_lifecycle, install_account_lifecycle
+    from wallet_challenges import challenge_message, validate_challenge
+    from credential_profile import credential_payload as build_credential_payload
 
 from web3 import Web3
 from web3.middleware import ExtraDataToPOAMiddleware
@@ -443,6 +451,7 @@ def init_db():
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
+                init_account_lifecycle(cur)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS issued_vcs (
                         ci_hash        TEXT PRIMARY KEY,
@@ -483,6 +492,7 @@ def init_db():
                         used_at        DOUBLE PRECISION
                     )
                 """)
+                cur.execute("ALTER TABLE login_nonces ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'login'")
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS user_login_sessions (
                         token_hash     TEXT PRIMARY KEY,
@@ -614,6 +624,7 @@ def cleanup_sessions():
             cur.execute("DELETE FROM auth_nonces WHERE expires_at < %s", (time.time(),))
             cur.execute("DELETE FROM login_nonces WHERE expires_at < %s", (time.time(),))
             cur.execute("DELETE FROM user_login_sessions WHERE expires_at < %s", (time.time(),))
+            cur.execute("DELETE FROM account_recovery_requests WHERE expires_at < %s", (time.time() - 86400,))
             cur.execute("DELETE FROM oid4vci_credential_offers WHERE expires_at < %s", (time.time(),))
             cur.execute("DELETE FROM oid4vci_access_tokens WHERE expires_at < %s", (time.time(),))
             cur.execute("DELETE FROM oid4vci_nonces WHERE expires_at < %s", (time.time(),))
@@ -900,7 +911,7 @@ def _get_active_oid4vci_offer(offer_id: str) -> dict:
     return offer
 
 
-def _send_oid4vci_tx_code(email: str, tx_code: str) -> None:
+def _send_oid4vci_tx_code(email: str, tx_code: str, purpose: str = 'issuance') -> None:
     sender_email = os.getenv("GMAIL_ID")
     sender_password = os.getenv("GMAIL_APP_PASSWORD")
     if not sender_email or not sender_password:
@@ -909,11 +920,11 @@ def _send_oid4vci_tx_code(email: str, tx_code: str) -> None:
     message = MIMEMultipart()
     message["From"] = sender_email
     message["To"] = email
-    message["Subject"] = "[TicketPro] 학생 인증서 Wallet 발급 코드"
+    message["Subject"] = "[TicketPro] 비밀번호 분실·모바일 지갑 복구 인증번호" if purpose == 'recovery' else "[TicketPro] 학생 인증서 Wallet 발급 코드"
     message.attach(
         MIMEText(
-            f"Wallet에서 입력할 6자리 발급 코드: [{tx_code}]\n"
-            "보안을 위해 Credential Offer 유효시간 안에 입력해 주세요.",
+            (f"모바일 지갑 복구 인증번호: [{tx_code}]\n3분 이내에 입력해주세요. 본인이 요청하지 않았다면 이 메일을 무시해주세요."
+             if purpose == 'recovery' else f"Wallet에서 입력할 6자리 발급 코드: [{tx_code}]\n보안을 위해 Credential Offer 유효시간 안에 입력해 주세요."),
             "plain",
         )
     )
@@ -1086,6 +1097,7 @@ class VPVerifyRequest(BaseModel):
 
 class LoginChallengeRequest(BaseModel):
     wallet_address: str
+    purpose: Literal['login', 'pairing'] = 'login'
 
     @field_validator("wallet_address")
     @classmethod
@@ -1135,8 +1147,20 @@ def _public_key_from_holder_jwk(jwk: dict) -> keys.PublicKey:
         raise HTTPException(status_code=400, detail="모바일 Wallet 공개키를 확인할 수 없습니다.") from None
 
 
-def _consume_login_challenge(request: LoginVerifyRequest) -> None:
+def _create_wallet_challenge(purpose, wallet_address, account=None):
     now = time.time()
+    nonce = secrets.token_hex(16)
+    expires_at = now + min(LOGIN_NONCE_TTL, 180 if purpose == 'withdraw' else 600)
+    message = challenge_message(purpose, wallet_address, nonce, EXPECTED_DOMAIN, now, expires_at, account)
+    with get_db_connection() as conn:
+        conn.execute('INSERT INTO login_nonces(nonce,wallet_address,message,expires_at,purpose) VALUES (%s,%s,%s,%s,%s)',
+                     (nonce, wallet_address, message, expires_at, purpose))
+    return {'nonce': nonce, 'message': message, 'expires_in': int(expires_at-now), 'wallet_address': wallet_address}
+
+
+def _consume_login_challenge(request: LoginVerifyRequest, purpose='login', account=None) -> None:
+    now = time.time()
+    validate_challenge(request, purpose, EXPECTED_DOMAIN, now, account)
     try:
         recovered_address = Account.recover_message(
             encode_defunct(text=request.message),
@@ -1151,7 +1175,7 @@ def _consume_login_challenge(request: LoginVerifyRequest) -> None:
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT wallet_address, message, expires_at, used_at FROM login_nonces WHERE nonce = %s FOR UPDATE",
+                "SELECT wallet_address, message, expires_at, used_at, purpose FROM login_nonces WHERE nonce = %s FOR UPDATE",
                 (request.nonce,),
             )
             challenge = cur.fetchone()
@@ -1160,7 +1184,8 @@ def _consume_login_challenge(request: LoginVerifyRequest) -> None:
             elif challenge["used_at"] is not None or now > challenge["expires_at"]:
                 failure = "로그인 Challenge가 사용되었거나 만료되었습니다."
             elif (
-                challenge["wallet_address"].lower() != request.wallet_address.lower()
+                challenge['purpose'] != purpose
+                or challenge["wallet_address"].lower() != request.wallet_address.lower()
                 or challenge["message"] != request.message
             ):
                 failure = "로그인 Challenge 정보가 일치하지 않습니다."
@@ -1237,6 +1262,8 @@ async def create_mobile_pairing(http_request: Request):
     pairing_uri = f"ticketprouserapp://mobile-pairing?token={quote(pairing_token, safe='')}"
     with get_db_connection() as conn:
         with conn.cursor() as cur:
+            cur.execute('SELECT ci_hash FROM issued_vcs WHERE ci_hash=%s FOR UPDATE', (credential['ci_hash'],))
+            _require_primary_web_session(http_request)
             cur.execute(
                 """
                 INSERT INTO mobile_pairing_sessions (
@@ -1352,7 +1379,7 @@ async def complete_mobile_pairing(request: MobilePairingCompleteRequest):
     public_key = _public_key_from_holder_jwk(request.holder_jwk)
     if public_key.to_checksum_address().lower() != request.wallet_address.lower():
         raise HTTPException(status_code=400, detail="모바일 Wallet 공개키와 주소가 일치하지 않습니다.")
-    _consume_login_challenge(request)
+    _consume_login_challenge(request, purpose='pairing')
 
     now = time.time()
     issued_at = datetime.now(timezone.utc)
@@ -1364,6 +1391,10 @@ async def complete_mobile_pairing(request: MobilePairingCompleteRequest):
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:
+            cur.execute('SELECT ci_hash FROM mobile_pairing_sessions WHERE token_hash=%s', (_token_hash(request.pairing_token),))
+            hint=cur.fetchone()
+            if not hint:raise HTTPException(404,'모바일 연결 QR이 유효하지 않습니다.')
+            cur.execute('SELECT ci_hash FROM issued_vcs WHERE ci_hash=%s FOR UPDATE',(hint['ci_hash'],))
             cur.execute(
                 """
                 SELECT pairing_id, ci_hash, email, parent_wallet_address, expires_at, used_at
@@ -1396,6 +1427,8 @@ async def complete_mobile_pairing(request: MobilePairingCompleteRequest):
             parent_expiry = expiry_timestamp(parent["expires_at"]) if parent else None
             if not parent or parent["revoked_wallet"] or parent_expiry is None or parent_expiry <= now:
                 raise HTTPException(status_code=403, detail="웹 DID/VC가 더 이상 유효하지 않습니다.")
+            expires_at = datetime.fromtimestamp(min(expires_at.timestamp(), parent_expiry), timezone.utc)
+            expires_str = expires_at.isoformat().replace('+00:00','Z')
 
             cur.execute(
                 "SELECT ci_hash FROM mobile_credentials WHERE LOWER(wallet_address) = LOWER(%s)",
@@ -1405,36 +1438,15 @@ async def complete_mobile_pairing(request: MobilePairingCompleteRequest):
             if existing and existing["ci_hash"] != pairing["ci_hash"]:
                 raise HTTPException(status_code=409, detail="이 모바일 Wallet은 다른 계정에 연결되어 있습니다.")
 
-            subject_did = f"did:pknu:{request.wallet_address}"
-            account_did = f"did:pknu:{pairing['parent_wallet_address']}"
             normalized_jwk = {
                 "kty": "EC",
                 "crv": "secp256k1",
                 "x": request.holder_jwk["x"],
                 "y": request.holder_jwk["y"],
             }
-            credential_payload = {
-                "iss": OID4VCI_ISSUER_BASE_URL,
-                "sub": subject_did,
-                "iat": int(issued_at.timestamp()),
-                "nbf": int(issued_at.timestamp()),
-                "exp": int(expires_at.timestamp()),
-                "jti": credential_id,
-                "cnf": {"jwk": normalized_jwk},
-                "vc": {
-                    "@context": ["https://www.w3.org/2018/credentials/v1"],
-                    "id": credential_id,
-                    "type": ["VerifiableCredential", "TicketProMobileCredential"],
-                    "issuer": OID4VCI_ISSUER_BASE_URL,
-                    "issuanceDate": issued_str,
-                    "expirationDate": expires_str,
-                    "credentialSubject": {
-                        "id": subject_did,
-                        "account": account_did,
-                        "authorization": "mobile_login",
-                    },
-                },
-            }
+            credential_payload = build_credential_payload(OID4VCI_ISSUER_BASE_URL, request.wallet_address,
+                normalized_jwk, 'TicketProMobileCredential', credential_id, issued_at.timestamp(),
+                expires_at.timestamp(), pairing['parent_wallet_address'])
             credential_jwt = _sign_es256k_jwt(
                 {"alg": "ES256K", "typ": "JWT", "kid": OID4VCI_ISSUER_KEY_ID},
                 credential_payload,
@@ -1479,6 +1491,18 @@ async def complete_mobile_pairing(request: MobilePairingCompleteRequest):
             )
             if not cur.fetchone():
                 raise HTTPException(status_code=409, detail="모바일 연결 QR이 동시에 사용되었습니다.")
+            cur.execute('SELECT request_id FROM account_recovery_requests WHERE code_hash=%s', ('grant:'+pairing['pairing_id'],))
+            if cur.fetchone():
+                # Successful email recovery replaces old mobile keys, never the NFT owner.
+                cur.execute('UPDATE mobile_pairing_sessions SET used_at=%s WHERE ci_hash=%s AND used_at IS NULL',(now,pairing['ci_hash']))
+                cur.execute('UPDATE account_recovery_requests SET used_at=%s WHERE LOWER(email)=LOWER(%s) AND used_at IS NULL',(now,pairing['email']))
+                cur.execute("""UPDATE mobile_credentials SET revoked_at=%s, revoked_reason='비밀번호 분실 복구'
+                    WHERE ci_hash=%s AND LOWER(wallet_address)<>LOWER(%s) AND revoked_at IS NULL""",
+                    (issued_str, pairing['ci_hash'], request.wallet_address))
+                cur.execute("""UPDATE user_login_sessions SET revoked_at=%s WHERE LOWER(wallet_address) IN
+                    (SELECT LOWER(wallet_address) FROM mobile_credentials WHERE ci_hash=%s
+                     AND LOWER(wallet_address)<>LOWER(%s)) AND revoked_at IS NULL""",
+                    (now, pairing['ci_hash'], request.wallet_address))
             cur.execute(
                 """
                 INSERT INTO user_login_sessions (
@@ -1861,32 +1885,8 @@ async def oid4vci_credential(
     expires_str = expires_at.isoformat().replace("+00:00", "Z")
     credential_id = f"urn:uuid:{secrets.token_hex(16)}"
 
-    vc_payload = {
-        "iss": OID4VCI_ISSUER_BASE_URL,
-        "sub": subject_did,
-        "iat": int(issued_at.timestamp()),
-        "nbf": int(issued_at.timestamp()),
-        "exp": int(expires_at.timestamp()),
-        "jti": credential_id,
-        "cnf": {"jwk": proof["jwk"]},
-        "vc": {
-            "@context": ["https://www.w3.org/2018/credentials/v1"],
-            "id": credential_id,
-            "type": ["VerifiableCredential", "PukyongStudentCredential"],
-            "issuer": OID4VCI_ISSUER_BASE_URL,
-            "issuanceDate": issued_str,
-            "expirationDate": expires_str,
-            "credentialStatus": {
-                "id": f"{OID4VCI_ISSUER_BASE_URL}/api/status/{holder_address}",
-                "type": "TicketProCredentialStatus",
-            },
-            "credentialSubject": {
-                "id": subject_did,
-                "university": "부경대학교",
-                "isStudent": True,
-            },
-        },
-    }
+    vc_payload = build_credential_payload(OID4VCI_ISSUER_BASE_URL, holder_address, proof['jwk'],
+        'PukyongStudentCredential', credential_id, issued_at.timestamp(), expires_at.timestamp())
     credential_jwt = _sign_es256k_jwt(
         {"alg": "ES256K", "typ": "JWT", "kid": OID4VCI_ISSUER_KEY_ID},
         vc_payload,
@@ -2093,31 +2093,7 @@ async def get_auth_challenge():
 
 @app.post("/api/login-challenge", summary="DID 키 파일 로그인용 일회성 Challenge 발급")
 async def create_login_challenge(request: LoginChallengeRequest):
-    now = time.time()
-    nonce = secrets.token_hex(16)
-    expires_at = now + LOGIN_NONCE_TTL
-    message = json.dumps({
-        "action": "ticketpro_login",
-        "wallet_address": request.wallet_address,
-        "nonce": nonce,
-        "domain": EXPECTED_DOMAIN,
-        "issued_at": int(now),
-        "expires_at": int(expires_at),
-    }, separators=(",", ":"), ensure_ascii=False)
-
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO login_nonces (nonce, wallet_address, message, expires_at) VALUES (%s, %s, %s, %s)",
-                (nonce, request.wallet_address, message, expires_at)
-            )
-        conn.commit()
-
-    return {
-        "nonce": nonce,
-        "message": message,
-        "expires_in": LOGIN_NONCE_TTL,
-    }
+    return _create_wallet_challenge(request.purpose, request.wallet_address)
 
 @app.post("/api/login-verify", summary="DID 키 파일 로그인 서명 검증 및 세션 발급")
 async def verify_login_challenge(request: LoginVerifyRequest):
@@ -2263,8 +2239,9 @@ async def logout(request: LogoutRequest):
     
 @app.get("/api/did/{address}", summary="DID Document Resolve")
 async def resolve_did(address: str):
-    if not is_checksum_address(address):
-        raise HTTPException(status_code=400, detail="유효하지 않은 주소 형식입니다. EIP-55를 준수해주세요.")
+    if not ADDRESS.fullmatch(address):
+        raise HTTPException(status_code=400, detail="유효하지 않은 주소 형식입니다.")
+    address = Web3.to_checksum_address(address)
 
     if address.lower() == ISSUER_ADDRESS.lower():
         return {
@@ -2274,10 +2251,11 @@ async def resolve_did(address: str):
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT issued_at, expires_at FROM issued_vcs WHERE wallet_address = %s", (address,))
+            cur.execute("SELECT issued_at, expires_at FROM issued_vcs WHERE LOWER(wallet_address) = LOWER(%s)", (address,))
             row = cur.fetchone()
-            cur.execute("SELECT revoked_at FROM revoked_vcs WHERE wallet_address = %s", (address,))
-            revoked = cur.fetchone()
+            if not row:
+                cur.execute('SELECT issued_at,expires_at FROM mobile_credentials WHERE LOWER(wallet_address)=LOWER(%s)',(address,))
+                row=cur.fetchone()
 
     if not row:
         raise HTTPException(status_code=404, detail="등록되지 않은 DID입니다.")
@@ -2285,7 +2263,7 @@ async def resolve_did(address: str):
     issued_at = row['issued_at']
     return {
         "didDocument": _build_did_document(address),
-        "didDocumentMetadata": {"created": issued_at, "updated": issued_at, "deactivated": revoked is not None}
+        "didDocumentMetadata": {"created": issued_at, "updated": issued_at, "deactivated": False}
     }
 
 @app.get("/api/status/{wallet_address}", summary="VC Revocation 상태 조회")
@@ -2670,3 +2648,6 @@ async def verify_vp(request: VPVerifyRequest):
     except Exception:
         logger.exception("VP 검증 실패")
         raise HTTPException(status_code=500, detail="VP 검증 처리에 실패했습니다.") from None
+
+
+install_account_lifecycle(app, globals())

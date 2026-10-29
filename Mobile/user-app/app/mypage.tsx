@@ -117,6 +117,11 @@ function TicketCard({ booking, accountAddress, onSeatPress }: { booking: Booking
         })}
       </View>
       <Text style={tc.bookingNo}>{booking.booking_no}</Text>
+      {booking.items.filter(item => ownsTicket(item, accountAddress) && getTicketState(booking, item) === 'minted' && !item.is_transferred).map(item => (
+        <TouchableOpacity key={`transfer-${item.booking_item_id}`} style={{ marginHorizontal: 18, marginBottom: 14, padding: 12, borderRadius: 12, backgroundColor: '#242436' }} onPress={() => router.push({ pathname: '/transfer-ticket', params: { bookingItemId: String(item.booking_item_id) } })}>
+          <Text style={{ color: '#FB7185', fontWeight: '600' }}>{item.seat_code} 동반인에게 양도 ›</Text>
+        </TouchableOpacity>
+      ))}
     </View>
   );
 }
@@ -259,6 +264,9 @@ export default function MyPageScreen() {
         </TouchableOpacity>
       </View>
 
+      <TouchableOpacity style={{ paddingHorizontal: 24, paddingBottom: 12 }} onPress={() => router.push('/account-recovery')}>
+        <Text style={{ color: '#9CA3AF' }}>계정 및 보안 · 비밀번호 변경 · 회원탈퇴 ›</Text>
+      </TouchableOpacity>
       <View style={s.statsBar}>
         <View style={s.statItem}><Text style={s.statValue}>{bookings.length}</Text><Text style={s.statLabel}>예매 건수</Text></View>
         <View style={s.statDivider} />

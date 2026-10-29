@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import './App.css'
 import { ethers } from 'ethers'
+import AccountTools, { AccountRecoveryForm } from './AccountTools'
+import { TICKET_API_URL, AUTH_API_URL } from './apiConfig'
 
-const TICKET_API_URL = import.meta.env.VITE_TICKET_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
-const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL ||
-  (import.meta.env.VITE_AUTH_VIA_BACKEND === 'true'
-    ? TICKET_API_URL
-    : import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001/api')
+function savedBrowserSession() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('ticketpro.web-session.v1') || 'null')
+    return saved && typeof saved.token === 'string' && ethers.isAddress(saved.user?.walletAddress) ? saved : null
+  } catch { return null }
+}
 
 function withPoster(ticket) {
   return {
@@ -162,9 +165,13 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(null)
   const [calYear, setCalYear] = useState(2026)
   const [calMonth, setCalMonth] = useState(8)
-  const [currentUser, setCurrentUser] = useState(null)
+  const [currentUser, setCurrentUser] = useState(() => savedBrowserSession()?.user ?? null)
   const [currentWallet, setCurrentWallet] = useState(null)
-  const [userToken, setUserToken] = useState('')
+  const [userToken, setUserToken] = useState(() => savedBrowserSession()?.token ?? '')
+  const browserSession = useRef(null)
+  browserSession.current = { currentUser, currentWallet, userToken }
+  const renewal = useRef(null)
+  const [showRevokedDevices, setShowRevokedDevices] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isEmailSending, setIsEmailSending] = useState(false)
   const [isCodeVerifying, setIsCodeVerifying] = useState(false)
@@ -211,6 +218,53 @@ function App() {
 
   const maxSlideIndex = Math.max(tickets.length - 5, 0)
   const performanceDates = useMemo(() => new Set(sessions.map((session) => toDateKey(session.session_start_at))), [sessions])
+
+  useEffect(() => {
+    const interceptor = axios.interceptors.response.use(response => response, async error => {
+      const config = error.config
+      const active = browserSession.current
+      const authHeader = config?.headers?.Authorization || config?.headers?.get?.('Authorization')
+      const allowed = config?.url?.startsWith(TICKET_API_URL + '/') || config?.url?.startsWith(AUTH_API_URL + '/')
+      if (error.response?.status !== 401 || !allowed || !authHeader || config._sessionRetried || config.url.includes('/login-') || config.url.includes('/account/withdraw')) throw error
+      if (!active.currentWallet || !active.currentUser || !active.userToken) throw error
+      if (authHeader !== `Bearer ${active.userToken}`) throw error
+      config._sessionRetried = true
+      if (!renewal.current) {
+        const expected = active.userToken
+        renewal.current = (async () => {
+          const { data: challenge } = await axios.post(`${AUTH_API_URL}/login-challenge`, { wallet_address: active.currentWallet.address }, { timeout: 15000 })
+          const signature = await active.currentWallet.signMessage(challenge.message)
+          const { data: verified } = await axios.post(`${AUTH_API_URL}/login-verify`, { wallet_address: active.currentWallet.address, nonce: challenge.nonce, message: challenge.message, signature }, { timeout: 15000 })
+          if (browserSession.current.userToken !== expected || (verified.account_wallet_address || active.currentWallet.address).toLowerCase() !== active.currentUser.walletAddress.toLowerCase()) throw new Error('로그인 상태가 변경되었습니다.')
+          browserSession.current = { ...active, userToken: verified.access_token }
+          setUserToken(verified.access_token)
+          return verified.access_token
+        })().finally(() => { renewal.current = null })
+      }
+      const token = await renewal.current
+      if (browserSession.current.userToken !== token || browserSession.current.currentWallet !== active.currentWallet) throw new Error('로그인 상태가 변경되었습니다.')
+      config.headers.Authorization = `Bearer ${token}`
+      return axios(config)
+    })
+    return () => axios.interceptors.response.eject(interceptor)
+  }, [])
+
+  useEffect(() => {
+    try {
+      if (currentUser && userToken) sessionStorage.setItem('ticketpro.web-session.v1', JSON.stringify({ user: currentUser, token: userToken }))
+      else sessionStorage.removeItem('ticketpro.web-session.v1')
+    } catch { /* Storage may be disabled; keep the current login usable. */ }
+  }, [currentUser, userToken])
+
+  useEffect(() => {
+    const saved = savedBrowserSession()
+    if (!saved) return
+    axios.get(`${TICKET_API_URL}/users/${saved.user.walletAddress}/profile`, { headers: { Authorization: `Bearer ${saved.token}` } }).catch(error => {
+      if (error.response?.status === 401 && browserSession.current.userToken === saved.token) {
+        setCurrentUser(null); setUserToken('')
+      }
+    })
+  }, [])
 
   useEffect(() => {
     const loadEvents = async () => {
@@ -906,6 +960,7 @@ function App() {
   }
 
   const handleLogout = async () => {
+    browserSession.current = { currentUser: null, currentWallet: null, userToken: '' }
     if (userToken) {
       try {
         await axios.post(`${AUTH_API_URL}/logout`, { access_token: userToken }, { timeout: 5000 })
@@ -1317,6 +1372,7 @@ function App() {
                   </button>
                 </form>
               </div>
+              <AccountRecoveryForm />
               <hr className="login-divider" />
               <div className="signup-prompt-box">
                 <p>아직 안전한 DID가 없으신가요?</p>
@@ -1977,10 +2033,11 @@ function App() {
 
                 <div className="mobile-device-list">
                   <h4>연결된 모바일 기기</h4>
-                  {mobileDevices.length === 0 ? (
+                  {mobileDevices.some(device => device.revoked_at) && <button className="account-link" onClick={() => setShowRevokedDevices(!showRevokedDevices)}>{showRevokedDevices ? '연결 해제 이력 접기' : `연결 해제 이력 보기 (${mobileDevices.filter(device => device.revoked_at).length})`}</button>}
+                  {mobileDevices.filter(device => showRevokedDevices || !device.revoked_at).length === 0 ? (
                     <p className="mobile-device-empty">아직 연결된 기기가 없습니다.</p>
                   ) : (
-                    mobileDevices.map((device) => (
+                    mobileDevices.filter(device => showRevokedDevices || !device.revoked_at).map((device) => (
                       <div className={`mobile-device-row ${device.revoked_at ? 'revoked' : ''}`} key={device.wallet_address}>
                         <div>
                           <strong>{device.device_name || '모바일 Wallet'}</strong>
@@ -1999,6 +2056,8 @@ function App() {
                   )}
                 </div>
               </section>
+              <AccountTools token={userToken} wallet={currentWallet} account={currentUser.walletAddress} onWithdraw={() => { browserSession.current = { currentUser: null, currentWallet: null, userToken: '' }; setCurrentUser(null); setCurrentWallet(null); setUserToken(''); setCurrentPage('main'); setBookedTickets([]); setWishTickets([]) }} />
+              {!currentWallet && <p className="account-tools">로그인 세션을 복원했습니다. 양도 승인·비밀번호 변경에는 키 파일로 다시 잠금 해제해주세요.</p>}
               <div className="mypage-tabs">
                 <button className={`tab-btn ${myPageTab === 'history' ? 'active' : ''}`} onClick={() => setMyPageTab('history')}>예매 내역</button>
                 <button className={`tab-btn ${myPageTab === 'wish' ? 'active' : ''}`} onClick={() => setMyPageTab('wish')}>찜 목록</button>
@@ -2097,27 +2156,27 @@ function App() {
               <section className="appguide-section">
                 <h3 className="appguide-section-title">앱 다운로드</h3>
                 <div className="appguide-download-box">
-                  <div className="appguide-qr-placeholder">
-                    <span className="appguide-qr-icon">📷</span>
-                    <p className="appguide-qr-text">앱 출시 후 업데이트 예정</p>
-                    <p className="appguide-qr-sub">QR 코드를 스캔하여 앱을 설치하세요</p>
+                  <div className="appguide-download-code">
+                    <img className="appguide-download-qr" src="/ticketpro-app-download.svg" alt="TicketPro Android 앱 다운로드 페이지 QR" />
+                    <p className="appguide-qr-text">휴대폰 카메라로 스캔하세요</p>
+                    <p className="appguide-qr-sub">앱 다운로드 페이지가 열립니다</p>
                   </div>
                   <div className="appguide-download-info">
-                    <div className="appguide-store-badge">
+                    <a className="appguide-store-badge" href="https://ticketpro.duckdns.org/downloads/">
                       <span>🤖</span>
                       <div>
-                        <p className="appguide-store-label">Google Play</p>
-                        <p className="appguide-store-name">Android 앱 다운로드</p>
+                        <p className="appguide-store-label">Android · 사용자</p>
+                        <p className="appguide-store-name">TicketPro 다운로드</p>
                       </div>
-                    </div>
-                    <div className="appguide-store-badge">
-                      <span>🍎</span>
+                    </a>
+                    <a className="appguide-store-badge" href="https://ticketpro.duckdns.org/downloads/ticketpro-admin-v2.apk" download>
+                      <span>📷</span>
                       <div>
-                        <p className="appguide-store-label">App Store</p>
-                        <p className="appguide-store-name">iOS 앱 다운로드</p>
+                        <p className="appguide-store-label">Android · 관리자</p>
+                        <p className="appguide-store-name">검증 앱 다운로드</p>
                       </div>
-                    </div>
-                    <p className="appguide-coming-soon">※ 현재 앱 출시 준비 중입니다. 출시 시 업데이트될 예정입니다.</p>
+                    </a>
+                    <p className="appguide-coming-soon">APK를 열어 설치해주세요. 기존 시연 앱이 있다면 삭제하지 않고 업데이트 설치할 수 있습니다.</p>
                   </div>
                 </div>
               </section>
