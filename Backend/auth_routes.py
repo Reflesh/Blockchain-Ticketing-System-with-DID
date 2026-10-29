@@ -132,6 +132,11 @@ def install_gateway_routes(app, gateway):
         path = '/api/account/' + name
         app.add_api_route(path, account_handler(path), methods=['POST'], name='account_'+name.replace('/', '_'))
 
+    @app.get('/api/account/credential')
+    async def account_credential_summary(request: Request):
+        return await relay_bytes('GET', '/api/account/credential',
+                                 authorization=request.headers.get('authorization', ''))
+
     @app.get("/api/did/{address}")
     async def did_document(address: str):
         if not ADDRESS.fullmatch(address):

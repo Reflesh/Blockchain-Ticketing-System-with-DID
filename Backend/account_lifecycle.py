@@ -5,7 +5,7 @@ import logging
 import secrets
 import time
 from datetime import datetime, timezone
-from fastapi import BackgroundTasks, Body, HTTPException, Request
+from fastapi import BackgroundTasks, Body, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 try:
     from .credential_profile import credential_payload
@@ -47,6 +47,43 @@ def install_account_lifecycle(app, g):
         if not result.get('active'):
             raise HTTPException(401, '로그인이 필요하거나 세션이 만료되었습니다.')
         return result
+
+    @app.get('/api/account/credential', summary='본인 원본 학생 인증서 정보')
+    def credential_summary(request: Request, response: Response):
+        identity = session(request)
+        account = identity['wallet_address']
+        with connection() as db:
+            with db.cursor() as cur:
+                cur.execute('''SELECT credential.issued_at, credential.expires_at, revoked.revoked_at
+                    FROM issued_vcs credential LEFT JOIN revoked_vcs revoked
+                    ON LOWER(revoked.wallet_address)=LOWER(credential.wallet_address)
+                    WHERE LOWER(credential.wallet_address)=LOWER(%s)''', (account,))
+                credential = cur.fetchone()
+
+        def normalize(value):
+            try:
+                date = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+                if date.tzinfo is None:
+                    date = date.replace(tzinfo=timezone.utc)
+                return date.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
+            except (TypeError, ValueError, OverflowError):
+                return None
+
+        issued_at = normalize(credential['issued_at']) if credential else None
+        expires_at = normalize(credential['expires_at']) if credential else None
+        if not credential:
+            status = 'not_issued'
+        elif credential['revoked_at'] is not None:
+            status = 'revoked'
+        elif not expires_at:
+            status = 'unknown'
+        elif datetime.fromisoformat(expires_at.replace('Z', '+00:00')) <= datetime.now(timezone.utc):
+            status = 'expired'
+        else:
+            status = 'active'
+        response.headers['Cache-Control'] = 'no-store'
+        return {'data': {'wallet_address': account, 'credential_type': 'PukyongStudentCredential',
+                         'issued_at': issued_at, 'expires_at': expires_at, 'status': status}}
 
     @app.post('/api/account/recovery/request')
     async def request_recovery(body: RecoveryEmail, background_tasks: BackgroundTasks):

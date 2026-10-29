@@ -59,7 +59,11 @@ for item in d['files']:
  if Path(item['name']).name!=item['name']:raise RuntimeError('Invalid artifact name')
  incoming=stage/item['name']
  if hashlib.sha256(incoming.read_bytes()).hexdigest()!=item['sha256']:raise RuntimeError('Upload checksum mismatch')
- output=target/item['name'];os.replace(incoming,output);output.chmod(0o644);os.chown(output,owner.pw_uid,owner.pw_gid)
+ output=target/item['name'];pending=target/(item['name']+'.'+stage.name+'.upload')
+ shutil.copyfile(incoming,pending)
+ if hashlib.sha256(pending.read_bytes()).hexdigest()!=item['sha256']:raise RuntimeError('Stored checksum mismatch')
+ pending.chmod(0o644);os.chown(pending,owner.pw_uid,owner.pw_gid)
+ os.replace(pending,output);incoming.unlink()
  if d['page'] is not None:
   public=Path('/var/www/ticketpro/downloads');public.mkdir(parents=True,exist_ok=True)
   shutil.copy2(output,public/output.name);(public/output.name).chmod(0o644)

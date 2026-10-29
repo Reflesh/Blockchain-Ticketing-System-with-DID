@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { ethers } from 'ethers';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Alert, ActivityIndicator, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { accountRequest, withdrawAccount } from '@/lib/account';
@@ -8,8 +9,21 @@ import { completeMobilePairing } from '@/lib/mobilePairing';
 import { resetLocalWallet, saveLocalWalletPassword, prepareReplacementWallet, finalizeReplacementWallet } from '@/lib/oid4vci';
 import { useWallet } from '@/context/WalletContext';
 
+type AccountSection = 'password' | 'recovery' | 'withdrawal';
+const ACCOUNT_SECTIONS: { id: AccountSection; label: string }[] = [
+  { id: 'password', label: '비밀번호 변경' },
+  { id: 'recovery', label: '지갑 복구' },
+  { id: 'withdrawal', label: '회원탈퇴' },
+];
+
+function isAccountSection(value: unknown): value is AccountSection {
+  return ACCOUNT_SECTIONS.some(item => item.id === value);
+}
+
 export default function AccountRecoveryScreen() {
   const { wallet, accessToken, setSession, logout, storageError } = useWallet();
+  const { section } = useLocalSearchParams<{ section?: string }>();
+  const [activeSection, setActiveSection] = useState<AccountSection>(isAccountSection(section) ? section : wallet ? 'password' : 'recovery');
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
@@ -20,6 +34,16 @@ export default function AccountRecoveryScreen() {
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [recoveryUri, setRecoveryUri] = useState('');
   const [replacement, setReplacement] = useState<ethers.Wallet | null>(null);
+
+  useEffect(() => {
+    if (isAccountSection(section)) setActiveSection(section);
+  }, [section]);
+
+  function selectSection(next: AccountSection) {
+    if (busy || next === activeSection) return;
+    setPassword(''); setConfirmation(''); setMessage('');
+    setActiveSection(next);
+  }
 
   async function run(operation: () => Promise<void>) {
     if (busy) return;
@@ -73,23 +97,128 @@ export default function AccountRecoveryScreen() {
       }) },
     ]);
   }
-  return <SafeAreaView style={s.safe}><KeyboardAvoidingView style={s.safe} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-    <View style={s.header}><TouchableOpacity onPress={() => router.back()}><Text style={s.back}>‹ 돌아가기</Text></TouchableOpacity><Text style={s.title}>계정 및 보안</Text></View>
-    <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-      <View style={s.card}><Text style={s.heading}>비밀번호 변경 · 분실 복구</Text><Text style={s.note}>로그인 상태에서는 현재 지갑의 비밀번호를 변경할 수 있습니다. 비밀번호를 잊었다면 대학 이메일로 재인증해 새 모바일 지갑을 연결합니다. NFT 소유 지갑과 티켓은 유지되며 기존 모바일 기기는 연결 해제됩니다.</Text>
-        <TextInput style={s.input} placeholder="새 비밀번호 (8자 이상)" placeholderTextColor="#73738C" secureTextEntry value={password} onChangeText={setPassword} editable={!busy}/>
-        <TextInput style={s.input} placeholder="새 비밀번호 확인" placeholderTextColor="#73738C" secureTextEntry value={confirmation} onChangeText={setConfirmation} editable={!busy}/>
-        {wallet && <TouchableOpacity disabled={busy} style={s.button} onPress={() => void run(changePassword)}><Text style={s.buttonText}>현재 지갑 비밀번호 변경</Text></TouchableOpacity>}
-        <TextInput style={s.input} placeholder="대학 이메일 (@pukyong.ac.kr)" placeholderTextColor="#73738C" autoCapitalize="none" keyboardType="email-address" value={email} onChangeText={setEmail} editable={!busy}/>
-        <TouchableOpacity disabled={busy} style={s.secondary} onPress={() => void run(sendCode)}><Text style={s.buttonText}>복구 인증번호 받기</Text></TouchableOpacity>
-        {!!requestId && <><TextInput style={s.input} placeholder="6자리 인증번호" placeholderTextColor="#73738C" keyboardType="number-pad" maxLength={6} value={code} onChangeText={setCode} editable={!busy}/>
-          <TouchableOpacity disabled={busy} style={s.button} onPress={() => Alert.alert('모바일 지갑 복구', '기존 모바일 기기의 연결이 해제됩니다. 새 지갑으로 복구할까요?', [{ text: '취소' }, { text: '복구', onPress: () => void run(recover) }])}><Text style={s.buttonText}>이메일 인증 후 비밀번호 재설정</Text></TouchableOpacity></>}
+  const passwordFields = (
+    <>
+      <View style={s.field}>
+        <Text style={s.label}>새 비밀번호</Text>
+        <TextInput style={s.input} placeholder="8자 이상 입력해주세요" placeholderTextColor="#73738C" secureTextEntry autoCapitalize="none" autoCorrect={false} accessibilityLabel="새 비밀번호" value={password} onChangeText={setPassword} editable={!busy}/>
       </View>
-      {busy && <ActivityIndicator color="#E11D48"/>}
-      {!!message && <Text accessibilityRole="alert" style={s.note}>{message}</Text>}
-      {!!storageError && <Text style={s.note}>{storageError}</Text>}
-      {!!wallet && !!accessToken && <View style={s.card}><Text style={s.heading}>회원탈퇴</Text><Text style={s.note}>미사용 티켓은 먼저 사용하거나 양도해주세요. 탈퇴는 블록체인 NFT 소각이나 결제 환불을 수행하지 않습니다.</Text><TouchableOpacity disabled={busy} style={s.secondary} onPress={confirmWithdrawal}><Text style={s.danger}>회원탈퇴</Text></TouchableOpacity></View>}
-    </ScrollView>
-  </KeyboardAvoidingView></SafeAreaView>;
+      <View style={s.field}>
+        <Text style={s.label}>새 비밀번호 확인</Text>
+        <TextInput style={s.input} placeholder="새 비밀번호를 한 번 더 입력해주세요" placeholderTextColor="#73738C" secureTextEntry autoCapitalize="none" autoCorrect={false} accessibilityLabel="새 비밀번호 확인" value={confirmation} onChangeText={setConfirmation} editable={!busy}/>
+      </View>
+    </>
+  );
+
+  return (
+    <SafeAreaView style={s.safe}>
+      <KeyboardAvoidingView style={s.safe} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={s.header}>
+          <TouchableOpacity disabled={busy} onPress={() => router.back()} style={s.back} accessibilityLabel="이전 화면으로 돌아가기">
+            <Ionicons name="chevron-back" size={23} color="#D1D5DB" />
+          </TouchableOpacity>
+          <Text style={s.title}>계정 및 보안</Text>
+        </View>
+        <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
+          <View style={s.tabs} accessibilityRole="tablist">
+            {ACCOUNT_SECTIONS.map(item => (
+              <TouchableOpacity key={item.id} disabled={busy} accessibilityRole="tab" accessibilityState={{ selected: activeSection === item.id, disabled: busy }} onPress={() => selectSection(item.id)} style={[s.tab, activeSection === item.id && s.activeTab, busy && s.disabled]}>
+                <Text style={[s.tabText, activeSection === item.id && s.activeTabText]}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {activeSection === 'password' && (
+            <View style={s.card}>
+              <View style={s.sectionHeading}><Ionicons name="lock-closed-outline" size={21} color="#D1D5DB" /><Text style={s.heading}>비밀번호 변경</Text></View>
+              <Text style={s.note}>이 기기의 Wallet 비밀번호를 변경합니다. 웹에서 내려받은 키 파일의 비밀번호는 바뀌지 않습니다.</Text>
+              {wallet ? <>
+                {passwordFields}
+                <TouchableOpacity disabled={busy} style={[s.button, busy && s.disabled]} onPress={() => void run(changePassword)}>
+                  {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.buttonText}>비밀번호 변경하기</Text>}
+                </TouchableOpacity>
+              </> : <>
+                <Text style={s.notice}>먼저 Wallet의 잠금을 해제한 뒤 변경할 수 있습니다.</Text>
+                <TouchableOpacity style={s.secondary} onPress={() => router.push('/credential-wallet')}><Text style={s.buttonText}>Wallet 잠금 해제하기</Text></TouchableOpacity>
+              </>}
+            </View>
+          )}
+
+          {activeSection === 'recovery' && (
+            <View style={s.card}>
+              <View style={s.sectionHeading}><Ionicons name="refresh-outline" size={21} color="#D1D5DB" /><Text style={s.heading}>비밀번호 분실 · 지갑 복구</Text></View>
+              <Text style={s.note}>비밀번호를 잊었다면 대학 이메일로 본인 인증 후 새 모바일 Wallet을 연결할 수 있습니다. 기존 티켓은 유지됩니다.</Text>
+              <Text style={s.notice}>복구가 완료되면 기존 모바일 기기의 연결이 해제됩니다.</Text>
+              <View style={s.field}>
+                <Text style={s.label}>대학 이메일</Text>
+                <TextInput style={s.input} placeholder="이메일 주소 (@pukyong.ac.kr)" placeholderTextColor="#73738C" autoCapitalize="none" autoCorrect={false} keyboardType="email-address" accessibilityLabel="대학 이메일" value={email} onChangeText={setEmail} editable={!busy}/>
+              </View>
+              <TouchableOpacity disabled={busy} style={[s.secondary, busy && s.disabled]} onPress={() => void run(sendCode)}>
+                {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.buttonText}>{requestId ? '인증번호 다시 받기' : '인증번호 받기'}</Text>}
+              </TouchableOpacity>
+              {!!requestId && <>
+                <View style={s.field}>
+                  <Text style={s.label}>인증번호</Text>
+                  <TextInput style={s.input} placeholder="이메일로 받은 6자리 숫자" placeholderTextColor="#73738C" keyboardType="number-pad" maxLength={6} accessibilityLabel="복구 인증번호" value={code} onChangeText={setCode} editable={!busy}/>
+                </View>
+                {passwordFields}
+                <TouchableOpacity disabled={busy} style={[s.button, busy && s.disabled]} onPress={() => Alert.alert('모바일 지갑 복구', '기존 모바일 기기의 연결이 해제됩니다. 새 지갑으로 복구할까요?', [{ text: '취소' }, { text: '복구', onPress: () => void run(recover) }])}>
+                  {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={s.buttonText}>새 비밀번호로 지갑 복구하기</Text>}
+                </TouchableOpacity>
+              </>}
+            </View>
+          )}
+
+          {activeSection === 'withdrawal' && (
+            <View style={[s.card, s.withdrawalCard]}>
+              <View style={s.sectionHeading}><Ionicons name="person-remove-outline" size={21} color="#C58A95" /><Text style={s.heading}>회원탈퇴</Text></View>
+              <Text style={s.note}>탈퇴 전에 아래 내용을 확인해주세요.</Text>
+              <View style={s.withdrawalNotes}>
+                <Text style={s.note}>• 미사용 티켓이나 진행 중인 결제가 있으면 탈퇴할 수 없습니다.</Text>
+                <Text style={s.note}>• 인증서와 모든 로그인 세션이 폐기됩니다.</Text>
+                <Text style={s.note}>• 예매·검표·블록체인 기록은 보존되며, 결제 환불은 진행되지 않습니다.</Text>
+              </View>
+              {wallet && accessToken ? (
+                <TouchableOpacity disabled={busy} style={[s.withdrawalButton, busy && s.disabled]} onPress={confirmWithdrawal}>
+                  {busy ? <ActivityIndicator color="#FB7185" /> : <Text style={s.danger}>회원탈퇴 진행하기</Text>}
+                </TouchableOpacity>
+              ) : <Text style={s.notice}>로그인하고 지갑 잠금을 해제한 뒤 이용할 수 있습니다.</Text>}
+            </View>
+          )}
+
+          {!!message && <View style={s.messageBox}><Text accessibilityRole="alert" style={s.note}>{message}</Text></View>}
+          {!!storageError && <Text style={s.note}>{storageError}</Text>}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
 }
-const s = StyleSheet.create({ safe: { flex: 1, backgroundColor: '#0A0A14' }, header: { padding: 20, gap: 12 }, back: { color: '#9CA3AF' }, title: { color: '#FFFFFF', fontSize: 24, fontWeight: '700' }, content: { padding: 20, gap: 16, paddingBottom: 60 }, card: { padding: 20, backgroundColor: '#13131F', borderRadius: 20, gap: 14 }, heading: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' }, note: { color: '#9CA3AF', lineHeight: 22, fontSize: 13 }, input: { color: '#FFFFFF', backgroundColor: '#1B1B2B', padding: 14, borderRadius: 12 }, button: { padding: 15, borderRadius: 12, backgroundColor: '#E11D48', alignItems: 'center' }, secondary: { padding: 15, borderRadius: 12, backgroundColor: '#242436', alignItems: 'center' }, buttonText: { color: '#FFFFFF', fontWeight: '600' }, danger: { color: '#FB7185', fontWeight: '600' } });
+const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: '#0A0A14' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  title: { color: '#FFFFFF', fontSize: 20, fontWeight: '700' },
+  content: { paddingHorizontal: 20, paddingTop: 8, gap: 20, paddingBottom: 60 },
+  tabs: { flexDirection: 'row', gap: 4, backgroundColor: '#13131F', padding: 4, borderRadius: 12 },
+  tab: { flex: 1, minHeight: 44, paddingHorizontal: 5, paddingVertical: 10, justifyContent: 'center', alignItems: 'center', borderRadius: 9 },
+  activeTab: { backgroundColor: 'rgba(225,29,72,0.13)' },
+  tabText: { color: '#9CA3AF', fontSize: 12, lineHeight: 18, textAlign: 'center', fontWeight: '500' },
+  activeTabText: { color: '#FB7185', fontWeight: '700' },
+  card: { padding: 20, backgroundColor: '#13131F', borderRadius: 18, gap: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  sectionHeading: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  heading: { flex: 1, color: '#FFFFFF', fontSize: 17, lineHeight: 25, fontWeight: '600' },
+  note: { color: '#9CA3AF', lineHeight: 22, fontSize: 13 },
+  notice: { color: '#C5AE83', fontSize: 12, lineHeight: 20, backgroundColor: 'rgba(197,174,131,0.07)', padding: 12, borderRadius: 10 },
+  field: { gap: 8 },
+  label: { color: '#D1D5DB', fontSize: 12, fontWeight: '500' },
+  input: { color: '#FFFFFF', backgroundColor: '#1B1B2B', padding: 14, borderRadius: 11, fontSize: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  button: { minHeight: 48, padding: 14, borderRadius: 11, backgroundColor: '#E11D48', alignItems: 'center', justifyContent: 'center' },
+  secondary: { minHeight: 48, padding: 14, borderRadius: 11, backgroundColor: '#242436', alignItems: 'center', justifyContent: 'center' },
+  buttonText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600', textAlign: 'center' },
+  disabled: { opacity: 0.5 },
+  withdrawalCard: { borderColor: 'rgba(197,138,149,0.18)' },
+  withdrawalNotes: { gap: 10, paddingVertical: 4 },
+  withdrawalButton: { minHeight: 48, padding: 14, borderRadius: 11, backgroundColor: 'rgba(251,113,133,0.07)', borderWidth: 1, borderColor: 'rgba(251,113,133,0.22)', alignItems: 'center', justifyContent: 'center' },
+  danger: { color: '#FB7185', fontSize: 13, fontWeight: '600' },
+  messageBox: { padding: 14, backgroundColor: '#171724', borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+});

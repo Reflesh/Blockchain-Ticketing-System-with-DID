@@ -93,3 +93,30 @@ npm run lint
 temporary tables and rolls back all changes. It sends no email, modifies no real
 account and submits no blockchain transaction. Physical camera scanning, real
 email delivery and real transfers require an explicit user acceptance test.
+
+## Event expectations and Q&A
+
+The web event detail page has visible shortcuts below the event title and a
+dedicated discussion panel below the booking overview. `event_community.py`
+creates the `event_posts` table at backend startup. Public paginated reads expose
+expectations, questions and user replies; writes require an existing user session
+and derive the author from that session. Content is limited to 2,000 characters
+and rendered as plain text. Replies must target a question in the same event.
+No new private keys, service accounts or runtime dependencies are needed.
+
+The mobile source uses the same API instead of the previous screen-local arrays.
+Already published APKs retain the old behavior until the next combined APK
+release. Existing temporary mobile posts cannot be migrated because they were
+never stored on the server. This feature does not change ticket ownership,
+payment, QR validation or account-recovery policies.
+
+## Original credential information on the web
+
+The web My Page shows a student credential card before mobile pairing. Its
+authenticated `GET /api/account/credential` request is relayed to Auth and uses
+the session's primary account, including for delegated mobile signers. The
+response contains only the account address, credential type, original issue and
+expiry dates, and status; it has `Cache-Control: no-store`. No JWT, email,
+private key or identity hash is returned. Reads never reissue or extend a VC.
+Dates are displayed with a four-digit year and local device time. A network
+failure shows a retry option instead of guessing validity or reusing old dates.

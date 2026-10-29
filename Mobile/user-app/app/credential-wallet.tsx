@@ -5,7 +5,9 @@ import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -33,6 +35,12 @@ function formatDate(seconds: number) {
   return new Date(seconds * 1000).toLocaleDateString('ko-KR');
 }
 
+// Give React and the native UI a frame to display the progress dialog before
+// key derivation starts doing CPU-intensive work on the JavaScript thread.
+function showWalletProgressFirst(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 80)));
+}
+
 export default function CredentialWalletScreen() {
   const { wallet, setSession, logout, isRestoring, storageError } = useWallet();
   const [permission, requestPermission] = useCameraPermissions();
@@ -48,6 +56,7 @@ export default function CredentialWalletScreen() {
   const [walletPassword, setWalletPassword] = useState('');
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletProgress, setWalletProgress] = useState<number | null>(null);
+  const [walletOperation, setWalletOperation] = useState('Wallet을 준비하고 있습니다');
   const walletFlowInFlight = useRef(false);
   const pairingInputError = getMobilePairingInputError(pairingValue);
   const canPair = canStartMobilePairing(pairingValue, issuing || walletBusy || isRestoring);
@@ -81,7 +90,11 @@ export default function CredentialWalletScreen() {
     setWalletBusy(true);
     setWalletProgress(0);
     const operation = hasSavedWallet ? 'Wallet 잠금 해제' : 'Wallet 암호화';
+    setWalletOperation(hasSavedWallet ? 'Wallet 잠금을 해제하고 있습니다' : '안전한 로컬 Wallet을 만들고 있습니다');
+    setStatus(`${operation}를 준비하고 있습니다…`);
+    Keyboard.dismiss();
     try {
+      await showWalletProgressFirst();
       const onProgress = (progress: number) => {
         const percent = Math.round(progress * 100);
         setWalletProgress(percent);
@@ -94,6 +107,8 @@ export default function CredentialWalletScreen() {
       setHasSavedWallet(true);
       if (hasSavedWallet) {
         try {
+          setWalletOperation('서버에 로그인하고 있습니다');
+          setWalletProgress(null);
           setStatus('Wallet 잠금을 해제했습니다. 서버 로그인을 진행하고 있습니다…');
           const session = await authenticateWallet(unlocked);
           const autoLoginSaved = await setSession(
@@ -203,7 +218,11 @@ export default function CredentialWalletScreen() {
       if (!pairingWallet) {
         setWalletBusy(true);
         setWalletProgress(0);
+        setWalletOperation('모바일 Wallet을 준비하고 있습니다');
+        Keyboard.dismiss();
+        await showWalletProgressFirst();
         const saved = await hasLocalEncryptedWallet();
+        setWalletOperation(saved ? 'Wallet 잠금을 해제하고 있습니다' : '안전한 로컬 Wallet을 만들고 있습니다');
         const onProgress = (progress: number) => {
           const percent = Math.round(progress * 100);
           setWalletProgress(percent);
@@ -296,6 +315,25 @@ export default function CredentialWalletScreen() {
 
   return (
     <SafeAreaView style={s.safe}>
+      <Modal visible={walletBusy} transparent animationType="none" statusBarTranslucent onRequestClose={() => {}}>
+        <View style={s.walletProgressBackdrop}>
+          <View style={s.walletProgressCard} accessibilityViewIsModal>
+            <ActivityIndicator size="large" color="#E11D48" accessibilityLabel="Wallet 처리 중" />
+            <Text style={s.walletProgressTitle}>{walletOperation}</Text>
+            {walletProgress !== null && (
+              <View style={s.walletProgressTrack} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: walletProgress }}>
+                <View style={[s.walletProgressFill, { width: `${walletProgress}%` }]} />
+              </View>
+            )}
+            <Text style={s.walletProgressDetail} accessibilityLiveRegion="polite">
+              {walletProgress === null ? '로그인 정보를 확인하고 있습니다…' : walletProgress >= 100 ? '암호화를 마무리하고 Wallet을 저장하고 있습니다…' : `Wallet 암호화 처리 중 · ${walletProgress}%`}
+            </Text>
+            <Text style={s.walletProgressHint}>
+              {walletProgress === null ? '네트워크 상태에 따라 잠시 걸릴 수 있습니다.' : '기기에 따라 20초 이상 걸릴 수 있습니다.'}{'\n'}완료될 때까지 앱을 닫지 말고 잠시 기다려주세요.
+            </Text>
+          </View>
+        </View>
+      </Modal>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -324,9 +362,10 @@ export default function CredentialWalletScreen() {
                   placeholder="Wallet 비밀번호 (8자 이상)"
                   placeholderTextColor="#6B7280"
                   secureTextEntry
+                  editable={!walletBusy && !issuing}
                 />
                 <View style={s.walletActionRow}>
-                  <TouchableOpacity style={s.secondaryButton} onPress={() => router.push('/login')}>
+                  <TouchableOpacity disabled={walletBusy || issuing} style={s.secondaryButton} onPress={() => router.push('/login')}>
                     <Text style={s.secondaryButtonText}>기존 키스토어 사용</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -371,7 +410,6 @@ export default function CredentialWalletScreen() {
               <Text style={s.scanButtonText}>모바일 연결 QR 스캔</Text>
             </TouchableOpacity>
 
-            <Text style={s.orText}>또는 Android 에뮬레이터에서 URI 직접 입력</Text>
             <TextInput
               style={s.offerInput}
               value={pairingValue}
@@ -472,6 +510,13 @@ export default function CredentialWalletScreen() {
 }
 
 const s = StyleSheet.create({
+  walletProgressBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.78)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  walletProgressCard: { width: '100%', maxWidth: 380, backgroundColor: '#151525', borderRadius: 22, padding: 26, alignItems: 'center', gap: 18, borderWidth: 1, borderColor: 'rgba(225,29,72,0.3)' },
+  walletProgressTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '800', textAlign: 'center', lineHeight: 25 },
+  walletProgressTrack: { width: '100%', height: 6, backgroundColor: '#2B293B', borderRadius: 3, overflow: 'hidden' },
+  walletProgressFill: { height: '100%', backgroundColor: '#E11D48' },
+  walletProgressDetail: { color: '#E5E7EB', fontSize: 13, textAlign: 'center', lineHeight: 20 },
+  walletProgressHint: { color: '#9CA3AF', fontSize: 12, textAlign: 'center', lineHeight: 20 },
   safe: { flex: 1, backgroundColor: '#0A0A14' },
   header: { height: 58, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14 },
   headerTitle: { color: '#FFFFFF', fontSize: 17, fontWeight: '800' },

@@ -118,6 +118,11 @@ def init_db():
                 except ImportError:
                     from mobile_transfers import init_mobile_transfers
                 init_mobile_transfers(cursor)
+                try:
+                    from .event_community import init_event_community
+                except ImportError:
+                    from event_community import init_event_community
+                init_event_community(cursor)
                 cursor.execute('ALTER TABLE blockchain_transactions ADD COLUMN IF NOT EXISTS recipient_wallet_address TEXT')
                 required_tables = [
                     "users",
@@ -789,3 +794,9 @@ try:
 except ImportError:
     from mobile_transfers import install_mobile_transfers
 install_mobile_transfers(app, get_db_connection, require_user_identity, API_ROUTES)
+
+try:
+    from .event_community import install_event_community
+except ImportError:
+    from event_community import install_event_community
+install_event_community(app, get_db_connection, require_user_session)

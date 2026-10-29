@@ -18,6 +18,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { createCommunityPost, getCommunity, getCommunityReplies, type CommunityPost } from '@/services/communityApi';
 import { mapEventResponse, type Concert } from '@/constants/concerts';
 import { TICKET_WEB_URL } from '@/constants/api';
 import { addWishlist, getEvent, getWishlist, removeWishlist } from '@/services/ticketApi';
@@ -26,7 +27,11 @@ const TABS = ['상세정보', '기대평', 'Q&A', '공연장정보', '예매유�
 
 type Post = { id: number; author: string; content: string; createdAt: string };
 type Reply = Post & { isOfficial: boolean };
-type QnaPost = Post & { replies: Reply[] };
+type QnaPost = Post & { replies: Reply[]; replyCount: number };
+
+function mapCommunityPost(post: CommunityPost): Post {
+  return { id: post.id, author: post.author, content: post.content, createdAt: new Date(post.created_at).toLocaleDateString('ko-KR') };
+}
 
 function shortAddr(addr: string) {
   if (!addr || addr.length <= 13) return addr;
@@ -66,10 +71,14 @@ function QnaCard({
   qna,
   accent,
   onReply,
+  onMoreReplies,
+  loadingReplies,
 }: {
   qna: QnaPost;
   accent: string;
   onReply: (id: number) => void;
+  onMoreReplies: (post: QnaPost) => void;
+  loadingReplies: boolean;
 }) {
   return (
     <View style={qc.wrap}>
@@ -117,6 +126,7 @@ function QnaCard({
           </View>
         </View>
       ))}
+      {qna.replies.length < qna.replyCount && <TouchableOpacity disabled={loadingReplies} style={qc.replyBtn} onPress={() => onMoreReplies(qna)}><Text style={qc.replyBtnText}>{loadingReplies ? '불러오는 중…' : '답변 더 보기'}</Text></TouchableOpacity>}
     </View>
   );
 }
@@ -196,9 +206,10 @@ function WriteModal({
   type: 'review' | 'qna' | 'reply' | null;
   accent: string;
   onClose: () => void;
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string) => Promise<boolean>;
 }) {
   const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
   const titleMap = { review: '기대평 작성', qna: '질문 작성', reply: '답변 작성' };
   const placeholderMap = {
     review: '공연에 대한 기대평을 남겨보세요...',
@@ -206,13 +217,15 @@ function WriteModal({
     reply: '답변을 작성해주세요...',
   };
 
-  const handleSubmit = () => {
-    if (!text.trim()) return;
-    onSubmit(text.trim());
-    setText('');
+  const handleSubmit = async () => {
+    if (!text.trim() || busy) return;
+    setBusy(true);
+    try { if (await onSubmit(text.trim())) setText(''); }
+    finally { setBusy(false); }
   };
 
   const handleClose = () => {
+    if (busy) return;
     setText('');
     onClose();
   };
@@ -227,6 +240,8 @@ function WriteModal({
           <TextInput
             style={wm.input}
             multiline
+            maxLength={2000}
+            editable={!busy}
             numberOfLines={5}
             placeholder={type ? placeholderMap[type] : ''}
             placeholderTextColor="#4B5563"
@@ -236,15 +251,15 @@ function WriteModal({
             autoFocus
           />
           <View style={wm.btnRow}>
-            <TouchableOpacity style={wm.cancelBtn} onPress={handleClose}>
+            <TouchableOpacity disabled={busy} style={wm.cancelBtn} onPress={handleClose}>
               <Text style={wm.cancelText}>취소</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[wm.submitBtn, { backgroundColor: accent }, !text.trim() && wm.submitDisabled]}
               onPress={handleSubmit}
-              disabled={!text.trim()}
+              disabled={busy || !text.trim()}
             >
-              <Text style={wm.submitText}>등록</Text>
+              {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={wm.submitText}>등록</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -305,6 +320,45 @@ export default function ConcertDetailScreen() {
   const [qnas, setQnas] = useState<QnaPost[]>([]);
   const [modalType, setModalType] = useState<'review' | 'qna' | 'reply' | null>(null);
   const [replyTargetId, setReplyTargetId] = useState<number | null>(null);
+  const [communityLoading, setCommunityLoading] = useState(false);
+  const [communityError, setCommunityError] = useState('');
+  const [replyLoading, setReplyLoading] = useState<number | null>(null);
+  const [communityNext, setCommunityNext] = useState<{ review: number | null; qna: number | null }>({ review: null, qna: null });
+
+  const loadCommunity = useCallback(async (kind: 'review' | 'qna', signal?: AbortSignal, offset = 0) => {
+    setCommunityLoading(true); setCommunityError('');
+    try {
+      const page = await getCommunity(concertId, kind, offset, signal);
+      if (signal?.aborted) return;
+      if (kind === 'review') {
+        const rows = page.data.map(mapCommunityPost);
+        setReviews(previous => offset ? [...new Map([...previous, ...rows].map(row => [row.id, row])).values()] : rows);
+      } else {
+        const rows = page.data.map(post => ({ ...mapCommunityPost(post), replyCount: post.reply_count || 0, replies: (post.replies || []).map(reply => ({ ...mapCommunityPost(reply), isOfficial: false })) }));
+        setQnas(previous => offset ? [...new Map([...previous, ...rows].map(row => [row.id, row])).values()] : rows);
+      }
+      setCommunityNext(previous => ({ ...previous, [kind]: page.next_offset }));
+    } catch (error) {
+      if (!signal?.aborted) setCommunityError(error instanceof Error ? error.message : '게시글을 불러오지 못했습니다.');
+    } finally { if (!signal?.aborted) setCommunityLoading(false); }
+  }, [concertId]);
+
+  useFocusEffect(useCallback(() => {
+    if (activeTab !== 1 && activeTab !== 2) return;
+    const controller = new AbortController();
+    void loadCommunity(activeTab === 1 ? 'review' : 'qna', controller.signal);
+    return () => controller.abort();
+  }, [activeTab, loadCommunity]));
+
+  const loadMoreReplies = async (post: QnaPost) => {
+    if (replyLoading !== null) return;
+    setReplyLoading(post.id);
+    try {
+      const rows = await getCommunityReplies(concertId, post.id, post.replies.length);
+      setQnas(previous => previous.map(item => item.id === post.id ? { ...item, replies: [...item.replies, ...rows.map(reply => ({ ...mapCommunityPost(reply), isOfficial: false }))] } : item));
+    } catch (error) { Alert.alert('답변 조회', error instanceof Error ? error.message : '답변을 불러오지 못했습니다.'); }
+    finally { setReplyLoading(null); }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -389,7 +443,7 @@ export default function ConcertDetailScreen() {
   const accent = concert.accentColor;
 
   const requireLogin = (cb: () => void) => {
-    if (!address) {
+    if (!address || !accessToken) {
       Alert.alert('로그인 필요', '로그인 후 이용해주세요.', [
         { text: '취소', style: 'cancel' },
         { text: '로그인', onPress: () => router.push('/login') },
@@ -410,26 +464,17 @@ export default function ConcertDetailScreen() {
     });
   };
 
-  const handleSubmit = (text: string) => {
-    const now = new Date();
-    const dateStr = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
-
-    if (modalType === 'review') {
-      const newPost: Post = { id: Date.now(), author: address ?? '', content: text, createdAt: dateStr };
-      setReviews((prev) => [newPost, ...prev]);
-    } else if (modalType === 'qna') {
-      const newQna: QnaPost = { id: Date.now(), author: address ?? '', content: text, createdAt: dateStr, replies: [] };
-      setQnas((prev) => [newQna, ...prev]);
-    } else if (modalType === 'reply' && replyTargetId !== null) {
-      const newReply: Reply = { id: Date.now(), author: address ?? '', content: text, createdAt: dateStr, isOfficial: false };
-      setQnas((prev) =>
-        prev.map((q) =>
-          q.id === replyTargetId ? { ...q, replies: [...q.replies, newReply] } : q
-        )
-      );
+  const handleSubmit = async (text: string): Promise<boolean> => {
+    if (!modalType || !accessToken) return false;
+    try {
+      await createCommunityPost(concertId, modalType, text, accessToken, replyTargetId ?? undefined);
+      setModalType(null); setReplyTargetId(null);
+      await loadCommunity(modalType === 'review' ? 'review' : 'qna');
+      return true;
+    } catch (error) {
+      Alert.alert('등록 실패', error instanceof Error ? error.message : '글을 등록하지 못했습니다.');
+      return false;
     }
-    setModalType(null);
-    setReplyTargetId(null);
   };
 
   const openWebBooking = () => {
@@ -511,6 +556,8 @@ export default function ConcertDetailScreen() {
 
       {/* ── Tab content ── */}
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 110 }}>
+        {(activeTab === 1 || activeTab === 2) && communityLoading && <ActivityIndicator style={{ marginTop: 20 }} color={accent} />}
+        {(activeTab === 1 || activeTab === 2) && !!communityError && <View style={s.tabContent}><Text style={s.emptySub}>{communityError}</Text><TouchableOpacity onPress={() => void loadCommunity(activeTab === 1 ? 'review' : 'qna')}><Text style={{ color: accent }}>다시 불러오기</Text></TouchableOpacity></View>}
 
         {/* 상세정보 */}
         {activeTab === 0 && (
@@ -541,7 +588,7 @@ export default function ConcertDetailScreen() {
               <Ionicons name="pencil-outline" size={15} color={accent} />
               <Text style={[s.writeBtnText, { color: accent }]}>기대평 남기기</Text>
             </TouchableOpacity>
-            {reviews.length === 0 ? (
+            {reviews.length === 0 && !communityLoading && !communityError ? (
               <View style={s.emptyState}>
                 <Ionicons name="chatbubble-outline" size={44} color="#1F1F30" />
                 <Text style={s.emptyTitle}>아직 기대평이 없습니다</Text>
@@ -550,6 +597,7 @@ export default function ConcertDetailScreen() {
             ) : (
               reviews.map((r) => <PostCard key={r.id} post={r} />)
             )}
+            {communityNext.review !== null && <TouchableOpacity disabled={communityLoading} style={s.writeBtn} onPress={() => void loadCommunity('review', undefined, communityNext.review ?? 0)}><Text style={{ color: accent }}>기대평 더 보기</Text></TouchableOpacity>}
           </View>
         )}
 
@@ -564,15 +612,16 @@ export default function ConcertDetailScreen() {
               <Ionicons name="help-circle-outline" size={15} color={accent} />
               <Text style={[s.writeBtnText, { color: accent }]}>질문 남기기</Text>
             </TouchableOpacity>
-            {qnas.length === 0 ? (
+            {qnas.length === 0 && !communityLoading && !communityError ? (
               <View style={s.emptyState}>
                 <Ionicons name="help-circle-outline" size={44} color="#1F1F30" />
                 <Text style={s.emptyTitle}>등록된 Q&A가 없습니다</Text>
                 <Text style={s.emptySub}>문의사항을 남겨주세요.</Text>
               </View>
             ) : (
-              qnas.map((q) => <QnaCard key={q.id} qna={q} accent={accent} onReply={handleReply} />)
+              qnas.map((q) => <QnaCard key={q.id} qna={q} accent={accent} onReply={handleReply} onMoreReplies={post => void loadMoreReplies(post)} loadingReplies={replyLoading !== null} />)
             )}
+            {communityNext.qna !== null && <TouchableOpacity disabled={communityLoading} style={s.writeBtn} onPress={() => void loadCommunity('qna', undefined, communityNext.qna ?? 0)}><Text style={{ color: accent }}>질문 더 보기</Text></TouchableOpacity>}
           </View>
         )}
 

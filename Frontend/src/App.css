@@ -36,6 +36,51 @@ body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smooth
 .detail-desc h2 { font-size: 28px; margin-top: 0; padding-bottom: 18px; border-bottom: 2px solid #f1f5f9; color: #0f172a; font-weight: 800; }
 .detail-desc ul { list-style: none; padding: 0; font-size: 15px; line-height: 2.4; color: #334155; }
 .detail-desc strong { color: #64748b; display: inline-block; width: 85px; font-weight: 600; }
+.detail-community-shortcuts { display: flex; flex-wrap: wrap; gap: 9px; margin: 0 0 18px; }
+.detail-community-shortcuts button { display: inline-flex; align-items: center; gap: 14px; padding: 10px 13px; border: 1px solid #f3d4de; border-radius: 9px; background: #fff7fa; color: #be123c; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.detail-community-shortcuts button:hover { background: #fce7ef; }
+.event-community { scroll-margin-top: 24px; margin-top: 28px; padding: 30px 34px; border: 1px solid #e8eaf0; border-radius: 20px; background: #fff; text-align: left; }
+.community-heading h2 { margin: 0; color: #0f172a; font-size: 22px; font-weight: 700; }
+.community-heading p { margin: 8px 0 24px; color: #64748b; font-size: 14px; line-height: 1.7; }
+.community-tabs { display: flex; gap: 24px; border-bottom: 1px solid #e8eaf0; margin-bottom: 24px; }
+.community-tabs button { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 2px 14px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #64748b; font-size: 16px; font-weight: 600; cursor: pointer; }
+.community-tabs button.active { color: #be123c; border-bottom-color: #e11d48; }
+.community-tabs button span { padding: 2px 7px; border-radius: 6px; background: #f1f5f9; color: #64748b; font-size: 11px; font-weight: 500; }
+.community-tabs button.active span { background: #fff1f5; color: #be123c; }
+.community-composer { padding: 18px; border: 1px solid #e8eaf0; border-radius: 12px; background: #fafbfc; margin-bottom: 24px; }
+.community-composer label { display: block; margin-bottom: 11px; color: #334155; font-size: 14px; font-weight: 600; }
+.community-composer textarea { display: block; box-sizing: border-box; width: 100%; min-height: 90px; padding: 13px; border: 1px solid #e2e8f0; border-radius: 8px; color: #334155; background: white; font: inherit; font-size: 14px; line-height: 1.7; resize: vertical; }
+.community-composer textarea::placeholder { color: #94a3b8; }
+.community-composer textarea:focus { outline: 2px solid #fbcfe8; outline-offset: 1px; border-color: #e11d48; }
+.community-composer-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.community-composer-footer span { font-size: 12px; color: #94a3b8; }
+.community-composer-footer button, .community-login button { min-height: 40px; padding: 10px 16px; border: 0; border-radius: 8px; background: #e11d48; color: white; font-size: 13px; font-weight: 600; cursor: pointer; }
+.community-login { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 18px; margin-bottom: 18px; border: 1px solid #f3e0e7; border-radius: 11px; background: #fff9fb; }
+.community-login p { margin: 0; color: #64748b; font-size: 13px; line-height: 1.7; }
+.event-community button:disabled { opacity: .5; cursor: default; }
+.event-community button:focus-visible, .detail-community-shortcuts button:focus-visible { outline: 2px solid #e11d48; outline-offset: 3px; }
+.community-empty { padding: 42px 12px; text-align: center; color: #64748b; font-size: 14px; }
+.community-empty strong { color: #475569; font-weight: 600; }
+.community-empty p { font-size: 13px; margin: 9px 0 0; }
+.community-post { padding: 24px 0; border-bottom: 1px solid #edf0f4; }
+.community-post-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; }
+.community-post-meta strong { color: #475569; font-weight: 500; }
+.community-post-meta time { color: #94a3b8; }
+.community-post-content { white-space: pre-wrap; overflow-wrap: anywhere; color: #334155; font-size: 14px; line-height: 1.8; margin: 12px 0 0; }
+.community-reply-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; font-size: 12px; color: #64748b; }
+.community-reply-actions button, .community-more-replies { border: 0; background: transparent; color: #be123c; font-size: 12px; padding: 9px 0; cursor: pointer; }
+.community-reply { padding: 16px 18px; margin-top: 12px; border-left: 2px solid #eadde3; border-radius: 0 8px 8px 0; background: #fafbfc; }
+.community-post .community-composer { margin: 14px 0 0; }
+.community-load-more { display: block; margin: 24px auto 0; padding: 12px 28px; border: 1px solid #e2e8f0; border-radius: 9px; background: white; color: #475569; font-size: 13px; cursor: pointer; }
+.community-error { padding: 14px 16px; border-radius: 10px; background: #fff1f2; color: #be123c; font-size: 13px; line-height: 1.7; }
+.community-error button { margin-left: 12px; border: 0; padding: 4px; background: transparent; color: inherit; text-decoration: underline; cursor: pointer; }
+.community-notice { font-size: 13px; color: #047857; }
+@media (max-width: 720px) {
+  .event-community { padding: 22px 18px; border-radius: 14px; }
+  .community-heading h2 { font-size: 20px; }
+  .community-composer { padding: 14px; }
+  .community-heading p { font-size: 13px; }
+}
 
 .detail-right { flex: 1; display: flex; flex-direction: column; gap: 16px; border-left: 1px solid #f1f5f9; padding-left: 40px; }
 .session-select { display: flex; flex-direction: column; gap: 12px; padding: 20px; background: #f8fafc; border-radius: 14px; border: 1px solid #e2e8f0; }
@@ -300,6 +345,35 @@ body { margin: 0; background-color: #f8fafc; color: #1e293b; -webkit-font-smooth
 .account-intent code { overflow-wrap: anywhere; max-width: 100%; }
 .account-link { border: 0; background: transparent; color: #be123c; cursor: pointer; padding: 10px 0; }
 .account-tools .account-danger, .account-tools .account-error { color: #be123c; }
+.credential-summary { margin: 20px 0; padding: 22px 24px; border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; text-align: left; }
+.credential-summary-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+.credential-summary-title { display: flex; align-items: center; gap: 12px; }
+.credential-summary-title svg { width: 38px; height: 38px; padding: 8px; border-radius: 10px; background: #fff1f5; color: #be123c; flex-shrink: 0; }
+.credential-summary-title h3 { margin: 0; color: #1e293b; font-size: 16px; font-weight: 600; }
+.credential-summary-title p { margin: 5px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+.credential-status { padding: 5px 10px; border-radius: 7px; font-size: 12px; font-weight: 600; }
+.credential-status.active { color: #047857; background: #ecfdf5; }
+.credential-status.inactive { color: #785a2c; background: #fff8eb; }
+.credential-summary-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 20px 0 16px; }
+.credential-summary-dates > div { padding: 16px 18px; border-radius: 10px; background: #f8fafc; }
+.credential-summary-dates dt { margin-bottom: 9px; color: #64748b; font-size: 12px; }
+.credential-summary-dates dd { margin: 0; color: #1e293b; font-size: 17px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+.credential-summary-dates dd span { display: block; margin-top: 3px; color: #64748b; font-size: 12px; font-weight: 400; }
+.credential-summary-footer { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.credential-summary-footer p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.7; }
+.credential-summary-footer p span { display: block; color: #94a3b8; }
+.credential-summary-footer button, .credential-summary-error button { padding: 3px 0; border: 0; background: transparent; color: #be123c; font-size: 12px; cursor: pointer; }
+.credential-summary-footer button:hover, .credential-summary-error button:hover { text-decoration: underline; }
+.credential-summary button:focus-visible { outline: 2px solid #e11d48; outline-offset: 4px; }
+.credential-summary-loading, .credential-summary-error p { color: #64748b; font-size: 13px; line-height: 1.7; margin: 20px 0 6px; }
+@media (max-width: 520px) {
+  .credential-summary { padding: 18px; }
+  .credential-summary-dates { grid-template-columns: 1fr; }
+}
+.wallet-unlock-notice { display: flex; align-items: flex-start; gap: 10px; margin: 16px 0 22px; padding: 15px 17px; border: 1px solid #ecdfc3; border-radius: 10px; background: #fffbf2; color: #775a2c; }
+.wallet-unlock-notice-icon { width: 19px; height: 19px; flex-shrink: 0; margin-top: 1px; color: #a57c35; }
+.wallet-unlock-notice strong { display: block; font-size: 13px; font-weight: 600; line-height: 1.6; }
+.wallet-unlock-notice p { margin: 4px 0 0; font-size: 13px; line-height: 1.7; color: #756952; overflow-wrap: anywhere; }
 .account-recovery-qr { display: block; width: 200px; max-width: 100%; margin: 15px auto; }
 
 .seat-chip.received {

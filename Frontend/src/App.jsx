@@ -3,6 +3,8 @@ import axios from 'axios'
 import './App.css'
 import { ethers } from 'ethers'
 import AccountTools, { AccountRecoveryForm } from './AccountTools'
+import EventCommunity from './EventCommunity'
+import CredentialSummary from './CredentialSummary'
 import { TICKET_API_URL, AUTH_API_URL } from './apiConfig'
 
 function savedBrowserSession() {
@@ -152,6 +154,7 @@ function App() {
   const [eventLoadStatus, setEventLoadStatus] = useState('loading')
   const [eventLoadError, setEventLoadError] = useState('')
   const [selectedTicket, setSelectedTicket] = useState(null)
+  const [communityTab, setCommunityTab] = useState('review')
   const [sessions, setSessions] = useState([])
   const [selectedSession, setSelectedSession] = useState(null)
   const [seats, setSeats] = useState([])
@@ -566,6 +569,7 @@ function App() {
   }
 
   const goToDetail = (ticket) => {
+    setCommunityTab('review')
     setSelectedTicket(ticket)
     setCurrentPage('detail')
     setSelectedDate(null)
@@ -1841,6 +1845,10 @@ function App() {
                 <img src={selectedTicket.image} alt="포스터" onError={handleImageError} />
                 <div className="detail-desc">
                   <h2>{selectedTicket.name}</h2>
+                  <div className="detail-community-shortcuts" aria-label="기대평과 질문 바로가기">
+                    <button type="button" onClick={() => { setCommunityTab('review'); document.getElementById('event-community')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>기대평 남기기 <span aria-hidden="true">↗</span></button>
+                    <button type="button" onClick={() => { setCommunityTab('qna'); document.getElementById('event-community')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>Q&A 질문하기 <span aria-hidden="true">↗</span></button>
+                  </div>
                   <ul>
                     <li><strong>장소:</strong> {selectedTicket.location}</li>
                     <li><strong>기간:</strong> {selectedTicket.period}</li>
@@ -1905,6 +1913,7 @@ function App() {
                 <button className="wish-btn" onClick={handleWish}>{wishTickets.find((ticket) => ticket.id === selectedTicket.id) ? '❤️' : '🤍'} 찜하기</button>
               </div>
             </div>
+            <EventCommunity key={selectedTicket.id} eventId={selectedTicket.id} tab={communityTab} onTabChange={setCommunityTab} token={userToken} onLogin={() => setCurrentPage('login')} />
           </div>
         )}
 
@@ -1983,6 +1992,7 @@ function App() {
             <button className="icon-back-btn" onClick={handleGoBack}>⬅</button>
             <div className="mypage-container">
               <h2 className="mypage-title">마이페이지 👤</h2>
+              <CredentialSummary key={currentUser.walletAddress} token={userToken} account={currentUser.walletAddress} />
               <section className="mobile-pairing-panel">
                 <div className="mobile-pairing-heading">
                   <div>
@@ -2057,7 +2067,19 @@ function App() {
                 </div>
               </section>
               <AccountTools token={userToken} wallet={currentWallet} account={currentUser.walletAddress} onWithdraw={() => { browserSession.current = { currentUser: null, currentWallet: null, userToken: '' }; setCurrentUser(null); setCurrentWallet(null); setUserToken(''); setCurrentPage('main'); setBookedTickets([]); setWishTickets([]) }} />
-              {!currentWallet && <p className="account-tools">로그인 세션을 복원했습니다. 양도 승인·비밀번호 변경에는 키 파일로 다시 잠금 해제해주세요.</p>}
+              {!currentWallet && (
+                <aside className="wallet-unlock-notice" role="note" aria-labelledby="wallet-unlock-notice-title">
+                  <svg className="wallet-unlock-notice-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7.5v5" />
+                    <circle cx="12" cy="16.5" r=".8" fill="currentColor" stroke="none" />
+                  </svg>
+                  <div>
+                    <strong id="wallet-unlock-notice-title">일부 기능은 지갑 잠금 해제가 필요합니다</strong>
+                    <p>로그인은 유지되고 있습니다. 티켓 양도 승인이나 키 파일 비밀번호 변경을 하려면, 키 파일과 비밀번호로 지갑 잠금을 해제해주세요.</p>
+                  </div>
+                </aside>
+              )}
               <div className="mypage-tabs">
                 <button className={`tab-btn ${myPageTab === 'history' ? 'active' : ''}`} onClick={() => setMyPageTab('history')}>예매 내역</button>
                 <button className={`tab-btn ${myPageTab === 'wish' ? 'active' : ''}`} onClick={() => setMyPageTab('wish')}>찜 목록</button>

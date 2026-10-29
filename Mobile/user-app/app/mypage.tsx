@@ -264,9 +264,28 @@ export default function MyPageScreen() {
         </TouchableOpacity>
       </View>
 
-      <TouchableOpacity style={{ paddingHorizontal: 24, paddingBottom: 12 }} onPress={() => router.push('/account-recovery')}>
-        <Text style={{ color: '#9CA3AF' }}>계정 및 보안 · 비밀번호 변경 · 회원탈퇴 ›</Text>
-      </TouchableOpacity>
+      <View style={s.accountCard}>
+        <View style={s.accountHeading}>
+          <Ionicons name="shield-checkmark-outline" size={18} color="#9CA3AF" />
+          <Text style={s.accountTitle}>계정 및 보안</Text>
+        </View>
+        <View style={s.accountActions}>
+          <TouchableOpacity style={s.accountAction} accessibilityRole="button" onPress={() => router.push({ pathname: '/account-recovery', params: { section: 'password' } })}>
+            <Ionicons name="lock-closed-outline" size={18} color="#D1D5DB" />
+            <Text style={s.accountActionText}>비밀번호 변경</Text>
+          </TouchableOpacity>
+          <View style={s.accountDivider} />
+          <TouchableOpacity style={s.accountAction} accessibilityRole="button" onPress={() => router.push({ pathname: '/account-recovery', params: { section: 'recovery' } })}>
+            <Ionicons name="refresh-outline" size={18} color="#D1D5DB" />
+            <Text style={s.accountActionText}>지갑 복구</Text>
+          </TouchableOpacity>
+          <View style={s.accountDivider} />
+          <TouchableOpacity style={s.accountAction} accessibilityRole="button" onPress={() => router.push({ pathname: '/account-recovery', params: { section: 'withdrawal' } })}>
+            <Ionicons name="person-remove-outline" size={18} color="#C58A95" />
+            <Text style={[s.accountActionText, s.accountWithdrawalText]}>회원탈퇴</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
       <View style={s.statsBar}>
         <View style={s.statItem}><Text style={s.statValue}>{bookings.length}</Text><Text style={s.statLabel}>예매 건수</Text></View>
         <View style={s.statDivider} />
@@ -361,6 +380,14 @@ const s = StyleSheet.create({
   linkState: { fontSize: 10, color: '#10B981', marginTop: 3 },
   linkStateError: { color: '#EF4444' },
   logoutBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.05)', justifyContent: 'center', alignItems: 'center' },
+  accountCard: { marginHorizontal: 20, marginBottom: 16, paddingHorizontal: 14, paddingTop: 14, paddingBottom: 6, borderRadius: 16, backgroundColor: '#13131F', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' },
+  accountHeading: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 2, paddingBottom: 10 },
+  accountTitle: { color: '#E5E7EB', fontSize: 13, fontWeight: '600' },
+  accountActions: { flexDirection: 'row', alignItems: 'stretch', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
+  accountAction: { flex: 1, minHeight: 64, paddingHorizontal: 4, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', gap: 7 },
+  accountActionText: { color: '#D1D5DB', fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  accountWithdrawalText: { color: '#C58A95' },
+  accountDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 14 },
   statsBar: { flexDirection: 'row', marginHorizontal: 20, marginBottom: 6, backgroundColor: '#13131F', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', paddingVertical: 16 },
   statItem: { flex: 1, alignItems: 'center' },
   statValue: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },

@@ -2,7 +2,7 @@
 
 Live origin: `https://ticketpro.duckdns.org`. The Let's Encrypt gateway was
 activated on 2026-10-27. Public web, API, issuer metadata and JWKS use this origin.
-Phone downloads: `https://ticketpro.duckdns.org/downloads/` (user APK v3, admin APK v2).
+Phone downloads: `https://ticketpro.duckdns.org/downloads/` (user APK v5, admin APK v3).
 
 Deployment paths are supplied explicitly; no developer PC path is required. The
 current demo checkout was renamed to `1029` on 2026-10-29. Existing backup folders
@@ -66,9 +66,15 @@ Android SDK, setting `JAVA_HOME` and `ANDROID_HOME`, or use the user-local tools
 under `~/.local/share/ticketpro-android` prepared for this project.
 
 ```
-python3 Mobile/build/build_apk.py user --public-url https://ticketpro.duckdns.org --version-code 3 --native-jobs 2
-python3 Mobile/build/build_apk.py admin --public-url https://ticketpro.duckdns.org --version-code 2
+python3 Mobile/build/build_apk.py user --public-url https://ticketpro.duckdns.org --version-code 5
+python3 Mobile/build/build_apk.py admin --public-url https://ticketpro.duckdns.org --version-code 3 --abis arm64-v8a
 ```
+
+The user build above covers arm64 phones and x86_64 emulators. The published
+admin v3 build targets arm64 phones; omit `--abis arm64-v8a` when an x86_64 admin
+emulator build is also needed. Use the same signing key for updates, and increase
+`--version-code` for each subsequent release. These are the latest published
+versions; the script's default version code is not a release counter.
 
 The default ABIs cover arm64 phones and x86_64 emulators. For the current HTTP
 demo only, pass `--public-url http://YOUR_DEVELOPMENT_HOST:8000 --http-demo`. The generated
@@ -85,7 +91,7 @@ fallback builds; after HTTPS migration, rebuild using the final HTTPS origin.
 To retain built APKs on the main host without publishing private files:
 
 ```
-python3 Backend/deploy/upload_apks.py --main-host SSH_USER@MAIN_HOST --project-root /path/to/checkout --service-user APP_USER --main-key /path/to/main.pem --public-url https://ticketpro.duckdns.org --publish artifacts/ticketpro-user-v3.apk artifacts/ticketpro-admin-v2.apk
+python3 Backend/deploy/upload_apks.py --main-host SSH_USER@MAIN_HOST --project-root /path/to/checkout --service-user APP_USER --main-key /path/to/main.pem --public-url https://ticketpro.duckdns.org --publish artifacts/ticketpro-user-v5.apk artifacts/ticketpro-admin-v3.apk
 ```
 
 They are stored in the configured remote checkout under `artifacts/`. After HTTPS APKs are ready, copy
