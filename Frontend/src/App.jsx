@@ -1382,11 +1382,8 @@ function App() {
                 <p>아직 안전한 DID가 없으신가요?</p>
                 {didStep === 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <button onClick={() => { setDidIssuanceMode('oid4vci'); setDidStep(1); }} className="did-signup-btn">
-                      📱 OpenID4VCI 호환 Wallet으로 학생 인증서 받기
-                    </button>
-                    <button onClick={() => { setDidIssuanceMode('legacy'); setDidStep(1); }} className="did-signup-btn" style={{ background: '#555' }}>
-                      🎓 기존 DID 키 파일 발급받기
+                    <button onClick={() => { setDidIssuanceMode('legacy'); setDidStep(1); }} className="did-signup-btn">
+                      🎓 학생 인증서 발급 받기
                     </button>
                   </div>
                 )}
@@ -2119,6 +2116,7 @@ function App() {
                                     >
                                       {item.seat_code}
                                       {getTicketTransferLabel(item, currentUser.walletAddress) && ` (${getTicketTransferLabel(item, currentUser.walletAddress)})`}
+                                      {item.ticket_status === 'used' && getTicketTransferLabel(item, currentUser.walletAddress) !== '양도 완료' && ' (입장 완료)'}
                                       {isTransferable(item, currentUser.walletAddress) && ' 🎁 (양도 가능)'}
                                     </span>
                                   ))
@@ -2135,7 +2133,7 @@ function App() {
                               </button>
                             )}
                           </div>
-                          <div className="history-status">예매완료</div>
+                          <div className="history-status">{ticket.items?.length > 0 && ticket.items.every(item => item.ticket_status === 'used' && getTicketTransferLabel(item, currentUser.walletAddress) !== '양도 완료') ? '입장 완료' : '예매완료'}</div>
                         </div>
                       )
                     })}

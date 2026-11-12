@@ -6,9 +6,14 @@ const LABELS = { review: '기대평', qna: 'Q&A' }
 const authorLabel = author => `${author.slice(0, 6)}···${author.slice(-4)}`
 const errorMessage = error => typeof error.response?.data?.detail === 'string' ? error.response.data.detail : '요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.'
 const uniqueReplies = rows => [...new Map(rows.map(row => [row.id, row])).values()].sort((a, b) => a.id - b.id)
+const normalizePost = post => {
+  const replies = Array.isArray(post.replies) ? post.replies : []
+  return { ...post, replies, reply_count: post.reply_count ?? 0, replyOffset: replies.length }
+}
 
 export default function EventCommunity({ eventId, tab, onTabChange, token, onLogin }) {
   const [posts, setPosts] = useState([])
+  const [postsTab, setPostsTab] = useState(null)
   const [counts, setCounts] = useState(null)
   const [nextOffset, setNextOffset] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -30,7 +35,7 @@ export default function EventCommunity({ eventId, tab, onTabChange, token, onLog
     setMoreLoading(false); setReplyLoading(null)
     axios.get(endpoint, { params: { kind: tab }, signal: controller.signal }).then(({ data }) => {
       if (controller.signal.aborted) return
-      setPosts(data.data.map(post => ({ ...post, replyOffset: post.replies?.length || 0 })))
+      setPosts(data.data.map(normalizePost)); setPostsTab(tab)
       setCounts(data.counts); setNextOffset(data.next_offset)
     }).catch(error => {
       if (!controller.signal.aborted) setError(errorMessage(error))
@@ -49,7 +54,7 @@ export default function EventCommunity({ eventId, tab, onTabChange, token, onLog
     try {
       const { data } = await axios.get(endpoint, { params: { kind: tab, offset: nextOffset } })
       if (epoch !== requestEpoch.current) return
-      setPosts(previous => [...new Map([...previous, ...data.data.map(post => ({ ...post, replyOffset: post.replies?.length || 0 }))].map(post => [post.id, post])).values()])
+      setPosts(previous => [...new Map([...previous, ...data.data.map(normalizePost)].map(post => [post.id, post])).values()])
       setCounts(data.counts); setNextOffset(data.next_offset)
     } catch (error) { if (epoch === requestEpoch.current) setError(errorMessage(error)) }
     finally { if (epoch === requestEpoch.current) setMoreLoading(false) }
@@ -107,8 +112,8 @@ export default function EventCommunity({ eventId, tab, onTabChange, token, onLog
     {token ? composer() : <div className="community-login"><p>글을 남기려면 로그인해주세요. 작성된 글은 로그인 없이 볼 수 있습니다.</p><button type="button" onClick={onLogin}>로그인하고 글 남기기</button></div>}
     {!!error && <div className="community-error" role="alert">{error}<button type="button" onClick={() => setRefresh(value => value+1)}>다시 불러오기</button></div>}
     {!!notice && <p className="community-notice" role="status">{notice}</p>}
-    {loading ? <p className="community-empty" role="status">{LABELS[tab]}을 불러오고 있습니다.</p> : !error && posts.length === 0 ? <div className="community-empty"><strong>{tab === 'review' ? '아직 기대평이 없습니다' : '아직 등록된 질문이 없습니다'}</strong><p>{tab === 'review' ? '첫 번째 기대평을 남겨보세요.' : '궁금했던 점을 먼저 물어보세요.'}</p></div> : null}
-    <div className="community-posts">{posts.map(post => <article className="community-post" key={post.id}>
+    {loading || (postsTab !== tab && !error) ? <p className="community-empty" role="status">{LABELS[tab]}을 불러오고 있습니다.</p> : !error && posts.length === 0 ? <div className="community-empty"><strong>{tab === 'review' ? '아직 기대평이 없습니다' : '아직 등록된 질문이 없습니다'}</strong><p>{tab === 'review' ? '첫 번째 기대평을 남겨보세요.' : '궁금했던 점을 먼저 물어보세요.'}</p></div> : null}
+    <div className="community-posts">{postsTab === tab && posts.map(post => <article className="community-post" key={post.id}>
       <div className="community-post-meta"><strong>{authorLabel(post.author)}</strong><time dateTime={post.created_at}>{new Date(post.created_at).toLocaleDateString('ko-KR')}</time></div>
       <p className="community-post-content">{post.content}</p>
       {tab === 'qna' && <>
@@ -118,6 +123,6 @@ export default function EventCommunity({ eventId, tab, onTabChange, token, onLog
         {replyTarget === post.id && composer(post)}
       </>}
     </article>)}</div>
-    {nextOffset !== null && <button type="button" className="community-load-more" disabled={moreLoading || posting} onClick={() => void loadMore()}>{moreLoading ? '불러오는 중…' : `${LABELS[tab]} 더 보기`}</button>}
+    {postsTab === tab && nextOffset !== null && <button type="button" className="community-load-more" disabled={moreLoading || posting} onClick={() => void loadMore()}>{moreLoading ? '불러오는 중…' : `${LABELS[tab]} 더 보기`}</button>}
   </section>
 }
