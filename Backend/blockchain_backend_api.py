@@ -371,14 +371,14 @@ async def user_profile_api(wallet_address: str, session_wallet=Depends(require_u
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    """
-                    SELECT username, auth_provider, verification_status
-                    FROM users
-                    WHERE LOWER(wallet_address) = LOWER(%s)
-                    """,
-                    (wallet_address,),
+                    "SELECT username,auth_provider,verification_status,status FROM users WHERE LOWER(wallet_address)=LOWER(%s)",
+                    (session_wallet,),
                 )
                 user = cursor.fetchone()
+        if not user:
+            raise HTTPException(status_code=409, detail={"code": "PROFILE_NOT_SYNCED", "message": "계정 정보가 동기화되지 않았습니다. 다시 로그인해주세요."})
+        if user["status"] != "active":
+            raise HTTPException(status_code=403, detail="이용이 제한된 계정입니다.")
 
         return {
             "status": "success",
@@ -386,7 +386,7 @@ async def user_profile_api(wallet_address: str, session_wallet=Depends(require_u
                 "wallet_address": wallet_address,
                 "display_name": (user or {}).get("username") or "TicketPro 회원",
                 "auth_provider": (user or {}).get("auth_provider") or "did_keystore",
-                "verification_status": (user or {}).get("verification_status") or "verified",
+                "verification_status": user["verification_status"],
             },
         }
     except HTTPException:

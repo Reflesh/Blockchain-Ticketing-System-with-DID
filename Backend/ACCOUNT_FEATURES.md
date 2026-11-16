@@ -2,6 +2,15 @@
 
 ## User flows
 
+- **Issuer-to-service profile sync (2026-11-16):** shared-DB deployments use
+  `SYNC_MAIN_USERS=true`. Verified primary issuance/login calls `account_sync.py`
+  to create the missing service profile. Existing nicknames are preserved;
+  restricted accounts are rejected rather than reactivated. New nickname
+  collisions use numeric suffixes, never the full email. Transaction locking
+  and case-insensitive address lookup prevent duplicate provisioning.
+  Profile reads require a matching authenticated session and return 409 when
+  provisioning is missing, or 403 for restricted accounts, instead of inventing
+  a verified default profile. No wallet, VC, NFT or mobile pairing is replaced.
 - **Forgot password:** the mobile login screen and certificate wallet link to
   `계정 및 보안`. Request a university email code, verify within three minutes,
   choose a new password and replace the mobile signer. Existing NFT account and

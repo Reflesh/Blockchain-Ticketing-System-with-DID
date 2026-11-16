@@ -50,47 +50,17 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
+try:
+    from .account_sync import sync_verified_user, ProfileRestrictedError
+except ImportError:
+    from account_sync import sync_verified_user, ProfileRestrictedError
+
+
 def sync_did_user(cursor, wallet_address, verified_email):
-    """인증된 이메일로 기본 닉네임을 만들고 기존 사용자의 닉네임은 보존한다."""
-    email = verified_email.strip().lower() if isinstance(verified_email, str) else ""
-    cursor.execute(
-        "SELECT wallet_address, username FROM users WHERE LOWER(wallet_address) = LOWER(%s)",
-        (wallet_address,),
-    )
-    existing = cursor.fetchone()
-    if existing:
-        wallet_address = existing["wallet_address"]
-
-    # 이메일 앞부분이 이미 사용 중이면 전체 이메일 또는 지갑 주소를 사용한다.
-    username = None
-    for candidate in ((existing or {}).get("username"), email.split("@", 1)[0], email, wallet_address):
-        if candidate is None:
-            continue
-        candidate = candidate.strip()
-        if not candidate or len(candidate) > 100:
-            continue
-        cursor.execute(
-            "SELECT id FROM users WHERE username = %s AND wallet_address <> %s",
-            (candidate, wallet_address),
-        )
-        if not cursor.fetchone():
-            username = candidate
-            break
-    if username is None:
-        raise ValueError("사용 가능한 기본 닉네임을 만들 수 없습니다.")
-
-    cursor.execute(
-        """
-        INSERT INTO users (username, wallet_address, auth_provider, verification_status)
-        VALUES (%s, %s, 'did_keystore', 'verified')
-        ON CONFLICT (wallet_address) DO UPDATE SET
-            username = COALESCE(NULLIF(TRIM(users.username), ''), EXCLUDED.username),
-            auth_provider = EXCLUDED.auth_provider,
-            verification_status = EXCLUDED.verification_status,
-            status = 'active'
-        """,
-        (username, wallet_address),
-    )
+    try:
+        return sync_verified_user(cursor, wallet_address, verified_email)
+    except ProfileRestrictedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
 
 
 def env_bool(name: str, default: bool = False) -> bool:
